@@ -1,0 +1,10 @@
+{
+  "recipients": [],
+  "rules": {
+    "Critical": ["email", "slack", "sms"],
+    "High":     ["email", "slack"],
+    "Medium":   ["email"],
+    "Low":      ["log"]
+  },
+  "notify_log": []
+}
