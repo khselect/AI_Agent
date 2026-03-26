@@ -17,6 +17,6 @@ https://claude.ai/public/artifacts/2a4c1515-0f3e-44f6-aaf8-2e5ea3e4bff7
 <img width="375" height="536" alt="image" src="https://github.com/user-attachments/assets/1300c0cf-3f6b-48ea-93b0-5a73b95fd10f" />
 <img width="370" height="536" alt="image" src="https://github.com/user-attachments/assets/d0eaec09-ac2b-4c6f-85e1-fc2e1fc85653" />
 <img width="371" height="536" alt="image" src="https://github.com/user-attachments/assets/88047b03-0424-4562-a4e6-cae582c28c4e" />
-<img width="576" height="536" alt="image" src="https://github.com/user-attachments/assets/71392a99-4256-4ef7-ae45-5c51e3fea233" />
+<img width="371" height="371" alt="image" src="https://github.com/user-attachments/assets/71392a99-4256-4ef7-ae45-5c51e3fea233" />
 
 
