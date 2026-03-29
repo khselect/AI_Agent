@@ -157,7 +157,7 @@ def make_rec(tc, retries=20):
     적설 = round(random.uniform(0,20),1) if 날씨=="눈" else 0.0
     지연여= "지연" if delay>0 else "무지연"
     지연수= random.randint(1,15) if delay>0 else 0
-    grade="High" if sc>=60 else ("Medium" if sc>=25 else "Low")
+    grade=("Critical" if sc>=80 else "High" if sc>=60 else "Medium" if sc>=25 else "Low")
     개요 = (f"{d} {hr:02d}:{mn:02d} {노선} {역A} 구간에서 {小} 발생. "
             f"사망 {dead}명 부상 {inj}명. {delay}분 운행 영향.")
     return {
@@ -195,8 +195,8 @@ def rebuild_db():
         이벤트대분류 VARCHAR, 이벤트중분류 VARCHAR, 이벤트소분류 VARCHAR, 주원인 VARCHAR,
         근본원인그룹 VARCHAR, 근본원인유형 VARCHAR, 근본원인상세 VARCHAR, 직접원인 VARCHAR,
         운행영향유형 VARCHAR, 지연여부 VARCHAR, 지연원인 VARCHAR, 지연원인상세 VARCHAR,
-        지연열차수 INTEGER, 최대지연시간_분 INTEGER,
-        총피해인원 INTEGER, 사망자수 INTEGER, 부상자수 INTEGER, 피해액_백만원 DOUBLE,
+        지연열차수 INTEGER, "최대지연시간(분)" INTEGER,
+        총피해인원 INTEGER, 사망자수 INTEGER, 부상자수 INTEGER, "피해액(백만원)" DOUBLE,
         행정구역 VARCHAR, 발생역A VARCHAR, 발생역B VARCHAR,
         장소대분류 VARCHAR, 장소중분류 VARCHAR, 상세위치 VARCHAR,
         기상상태 VARCHAR, 온도 DOUBLE, 강우량 DOUBLE, 적설량 DOUBLE,
