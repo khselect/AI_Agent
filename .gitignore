@@ -1,0 +1,25 @@
+# 가상환경
+.venv/
+venv/
+env/
+
+# Python 캐시
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# IDE
+.DS_Store
+.idea/
+.vscode/
+
+# 환경변수
+.env
+.env.local
+
+# 빌드
+dist/
+build/
+*.egg-info/
