@@ -45,7 +45,7 @@ from ui.tab_forecast import render_forecast_tab
 # ── LLM (PDF 추출용 — UI 강화 버전 로컬 유지) ────────────────
 try:
     from langchain_ollama import ChatOllama
-    from langchain.schema import HumanMessage, SystemMessage
+    from langchain_core.messages import HumanMessage, SystemMessage
     LLM_AVAILABLE = True
 except ImportError:
     LLM_AVAILABLE = False
