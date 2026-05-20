@@ -352,7 +352,7 @@ def _slice_text(text, idx):
     s, e = BATCH_SLICE[idx]
     return (text[s:e] if e else text[s:])[:12000]
 
-def extract_from_pdf(pdf_bytes: bytes, model_name: str = "qwen2.5:3b",
+def extract_from_pdf(pdf_bytes: bytes, model_name: str = "qwen3:32",
                      progress_fn=None) -> Tuple[dict, str]:
     """
     3단계 PDF 추출 파이프라인.
@@ -371,38 +371,42 @@ def extract_from_pdf(pdf_bytes: bytes, model_name: str = "qwen2.5:3b",
         result = _regex_base(report_text)
 
         if LLM_OK:
-            llm = ChatOllama(
+            llm_kwargs = dict(
                 model=model_name, base_url="http://127.0.0.1:11434",
                 temperature=0, num_ctx=32768,
-                # num_predict 는 langchain_ollama 에서 num_predict → Ollama 옵션으로 전달
-                num_predict=2048,
+                num_predict=4096,
+                format="json",
             )
+            if _is_qwen3(model_name):
+                llm_kwargs["reasoning"] = False  # Ollama think=false 전달 (langchain_ollama 0.3+)
+            llm = ChatOllama(**llm_kwargs)
+            sys_msg = SystemMessage(content="You are a structured data extractor. Output ONLY valid JSON.")
             for i, batch_cols in enumerate(BATCHES):
                 if progress_fn:
                     progress_fn(0.1 + i*0.17, f"배치 {i+1}/5 추출 중...")
-                prefix = "/no_think\n" if _is_qwen3(model_name) else ""
-                schema_keys = ", ".join(f'"{n}"' for n,_ in batch_cols)
                 guide = "\n".join(f'  - "{n}": {desc}' for n,desc in batch_cols)
                 text_chunk = _slice_text(report_text, i)
                 json_tmpl = "{" + ", ".join(f'"{n}": null' for n,_ in batch_cols) + "}"
                 prompt = (
-                    f"{prefix}You are a railway accident report data extractor.\n"
-                    f"Extract ONLY the fields listed below from the [REPORT] and return a single JSON object.\n"
-                    f"STRICT RULES:\n1. Output ONLY the JSON object — no explanation, no markdown\n"
-                    f"2. Use null for missing fields\n3. Date: YYYY-MM-DD, Time: HH:MM\n"
-                    f"4. Numeric fields: use numbers without quotes\n"
+                    "You are a railway accident report data extractor.\n"
+                    "Extract ONLY the fields listed below from the [REPORT] and return a single JSON object.\n"
+                    "STRICT RULES:\n1. Output ONLY the JSON object — no explanation, no markdown\n"
+                    "2. Use null for missing fields\n3. Date: YYYY-MM-DD, Time: HH:MM\n"
+                    "4. Numeric fields: use numbers without quotes\n"
                     f"FIELDS:\n{guide}\nOUTPUT TEMPLATE:\n{json_tmpl}\n[REPORT]\n{text_chunk}\nJSON:"
                 )
-                sys_msg = SystemMessage(content="You are a structured data extractor. Output ONLY valid JSON.")
-                human_msg = HumanMessage(content=prompt)
-                try:
-                    raw = llm.invoke([sys_msg, human_msg]).content
-                    batch_result = _safe_json(raw)
-                    for k, v in batch_result.items():
-                        if v is not None and str(v).strip() not in ('','null','None'):
-                            result[k] = v
-                except Exception:
-                    pass
+                msgs = [sys_msg, HumanMessage(content=prompt)]
+                for attempt in range(2):
+                    try:
+                        raw = llm.invoke(msgs).content
+                        batch_result = _safe_json(raw)
+                        if batch_result:
+                            for k, v in batch_result.items():
+                                if v is not None and str(v).strip() not in ('','null','None'):
+                                    result[k] = v
+                            break
+                    except Exception:
+                        pass
 
         return result, report_text
 

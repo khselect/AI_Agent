@@ -452,12 +452,16 @@ def extract_from_pdf(pdf_bytes: bytes, model_name: str, progress_fn=None) -> tup
         result = _regex_base(report_text)
 
         if LLM_AVAILABLE:
-            llm = ChatOllama(
+            llm_kwargs = dict(
                 model=model_name, base_url="http://127.0.0.1:11434",
                 temperature=0,
-                num_ctx=32768,   # ↑ 8192→32768: 한국어 장문 보고서 전체 처리
-                num_predict=2048,
+                num_ctx=32768,
+                num_predict=4096,
+                format="json",
             )
+            if _is_qwen3(model_name):
+                llm_kwargs["reasoning"] = False  # Ollama think=false 전달 (langchain_ollama 0.3+)
+            llm = ChatOllama(**llm_kwargs)
             sys_msg = SystemMessage(content=(
                 "You are a structured data extractor. "
                 "Output ONLY a valid JSON object. "
@@ -466,17 +470,22 @@ def extract_from_pdf(pdf_bytes: bytes, model_name: str, progress_fn=None) -> tup
             for i, batch in enumerate(BATCHES):
                 pct = 0.15 + 0.65 * i / len(BATCHES)
                 if progress_fn: progress_fn(pct, f"🤖 배치 {i+1}/{len(BATCHES)}: {BATCH_NAMES[i]} 추출 중...")
-                try:
-                    # batch_idx 전달 → 배치별 최적 텍스트 구간 사용
-                    prompt = _build_batch_prompt(batch, report_text, model_name, batch_idx=i)
-                    resp = llm.invoke([sys_msg, HumanMessage(content=prompt)])
-                    batch_result = _safe_json(resp.content)
-                    for col_name, _ in batch:
-                        val = batch_result.get(col_name)
-                        if val is not None and str(val).strip() not in ("","null","NULL","None",""):
-                            result[col_name] = str(val).strip()
-                except Exception as e:
-                    if progress_fn: progress_fn(pct, f"⚠️ 배치 {i+1} 오류: {e}")
+                prompt = _build_batch_prompt(batch, report_text, model_name, batch_idx=i)
+                msgs = [sys_msg, HumanMessage(content=prompt)]
+                batch_result = {}
+                for attempt in range(2):
+                    try:
+                        resp = llm.invoke(msgs)
+                        batch_result = _safe_json(resp.content)
+                        if batch_result:
+                            break
+                    except Exception as e:
+                        if attempt == 1 and progress_fn:
+                            progress_fn(pct, f"⚠️ 배치 {i+1} 오류: {e}")
+                for col_name, _ in batch:
+                    val = batch_result.get(col_name)
+                    if val is not None and str(val).strip() not in ("","null","NULL","None",""):
+                        result[col_name] = str(val).strip()
 
         result['데이터출처'] = result.get('데이터출처') or 'PDF 자동 추출'
         # 추출률 계산 및 로깅
@@ -496,14 +505,15 @@ def extract_from_pdf(pdf_bytes: bytes, model_name: str, progress_fn=None) -> tup
 # ══════════════════════════════════════════════════════════════
 # 4. Streamlit UI
 # ══════════════════════════════════════════════════════════════
-st.set_page_config(page_title="🚄 철도 사고 분석 시스템", layout="wide", initial_sidebar_state="expanded")
-st.title("🚄 철도 사고조사 데이터 분석 시스템")
+st.set_page_config(page_title="🚄 철도사고 위험도 평가 AI에이전트", layout="wide", initial_sidebar_state="expanded")
+st.title("🚄 철도사고 위험도 평가 AI에이전트")
+st.caption("v1.4.0 · commit `b4ba128` · [GitHub](https://github.com/khselect/AI_Agent)")
 
 # ── 사이드바 ──────────────────────────────────────────────────
 with st.sidebar:
     st.header("⚙️ 설정")
     CONFIG_FILE = os.path.join(SHARED_DIR, "system_config.json")
-    default_model = "qwen2.5:7b-instruct"
+    default_model = "qwen3:32"
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE) as f:
@@ -511,7 +521,7 @@ with st.sidebar:
         except Exception:
             pass
 
-    MODELS = ["qwen3:8b","qwen2.5:7b-instruct","llama3.1:8b"]
+    MODELS = ["qwen3:32","qwen3:8b","qwen2.5:7b-instruct","llama3.1:8b"]
     try: midx = MODELS.index(default_model)
     except ValueError: midx = 1
 
