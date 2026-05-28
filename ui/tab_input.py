@@ -1,6 +1,7 @@
 """
 ui/tab_input.py — 탭1: 보고서 입력 (PDF 자동추출 / 수동입력)
 """
+import time
 import streamlit as st
 import pandas as pd
 from safety_core import insert_accident, calculate_risk
@@ -42,23 +43,43 @@ def render_input_tab(model_name: str, extract_from_pdf_fn, columns, batches, col
                 if st.button("🚀 추출 + DB 저장", type="primary"):
                     prog = st.progress(0.0)
                     stat = st.empty()
+                    timer_ph = st.empty()
                     def upd(pct, msg):
+                        elapsed = time.time() - t_start
                         prog.progress(pct)
                         stat.info(msg)
+                        timer_ph.caption(f"⏱ 경과 {elapsed:.1f}초")
                     try:
+                        t_start = time.time()
                         extracted, _ = extract_from_pdf_fn(uploaded.getvalue(), model_name, upd)
+                        t_extracted = time.time()
+                        elapsed_extract = t_extracted - t_start
+
+                        stat.info("DB 저장 중...")
                         row_id = insert_accident(extracted, uploaded.name)
+                        t_saved = time.time()
+                        elapsed_total = t_saved - t_start
+                        elapsed_save = t_saved - t_extracted
+
                         prog.progress(1.0)
-                        stat.success(f"🎉 저장 완료! (DB ID: {row_id})")
+                        timer_ph.empty()
+                        stat.success(
+                            f"🎉 저장 완료! (DB ID: {row_id}) · "
+                            f"추출 {elapsed_extract:.1f}s · 저장 {elapsed_save:.1f}s · "
+                            f"총 {elapsed_total:.1f}s"
+                        )
                         score, grade = calculate_risk(extracted)
                         filled = sum(1 for k in column_names if extracted.get(k) not in _EMPTY)
                         st.session_state["tab1_result"] = {
-                            "row_id":    row_id,
-                            "source":    uploaded.name,
-                            "grade":     grade,
-                            "score":     score,
-                            "filled":    filled,
-                            "extracted": extracted,
+                            "row_id":          row_id,
+                            "source":          uploaded.name,
+                            "grade":           grade,
+                            "score":           score,
+                            "filled":          filled,
+                            "extracted":       extracted,
+                            "elapsed_extract": elapsed_extract,
+                            "elapsed_save":    elapsed_save,
+                            "elapsed_total":   elapsed_total,
                         }
                     except Exception as e:
                         import traceback
@@ -72,6 +93,11 @@ def render_input_tab(model_name: str, extract_from_pdf_fn, columns, batches, col
                 c1.metric("위험 등급", _r["grade"])
                 c2.metric("위험 점수", f"{_r['score']}점")
                 c3.metric("추출 필드", f"{_r['filled']}/{len(column_names)}")
+                if "elapsed_total" in _r:
+                    t1, t2, t3 = st.columns(3)
+                    t1.metric("⏱ PDF 추출 시간", f"{_r['elapsed_extract']:.1f}s")
+                    t2.metric("⏱ DB 저장 시간",  f"{_r['elapsed_save']:.1f}s")
+                    t3.metric("⏱ 총 소요 시간",  f"{_r['elapsed_total']:.1f}s")
                 with st.expander("📋 추출 결과 (노란색=미추출)", expanded=True):
                     rows = []
                     for n, desc in columns:

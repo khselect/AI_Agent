@@ -23,7 +23,8 @@
 
 - **UI**: Streamlit (`safety_analytics.py`)
 - **에이전트**: LangGraph + Ollama (`railway_agent/railway_safety_agent.py`)
-- **LLM**: Ollama 로컬 서버 (`http://127.0.0.1:11434`), 기본 모델 `qwen2.5:3b`
+- **LLM**: Ollama 로컬 서버 (`http://127.0.0.1:11434`), 기본 모델 `qwen3:32b`
+- **현재 버전**: v1.7.0 (추출률 95%+)
 
 ---
 
@@ -34,10 +35,19 @@ Safety_agent/
 ├── safety_analytics.py          # Streamlit UI 진입점 (streamlit run)
 ├── safety_core.py               # 공유 비즈니스 로직 (UI 의존성 없음)
 ├── gen_data.py                  # 가상 데이터 생성기 (python gen_data.py)
+├── log.md                       # 버전별 변경 이력 [문제점][개선점]
+├── docs/
+│   └── 기술상세서.md             # 비전공자용 시스템 설명서
 ├── shared/
 │   ├── railway_accidents.duckdb # 사고 데이터 DB
 │   ├── notify_config.json       # 수신자·채널·알림 이력
 │   └── notify_config_template.json
+├── ui/
+│   ├── tab_input.py             # 보고서 입력 탭
+│   ├── tab_data.py              # 데이터 조회 탭
+│   ├── tab_dashboard.py         # 대시보드 탭
+│   ├── tab_risk.py              # 위험도 평가 탭
+│   └── tab_forecast.py          # 위험 예측 탭
 └── railway_agent/
     ├── __init__.py
     ├── railway_safety_agent.py  # LangGraph 에이전트 + Tool 정의
@@ -52,6 +62,7 @@ Safety_agent/
 
 ```
 UI 레이어          safety_analytics.py  (Streamlit, import safety_core)
+                   ui/tab_*.py          (탭별 분리 모듈)
                    railway_agent/agent_ui.py (Streamlit 탭)
         ↓ import
 Core 레이어        safety_core.py       (비즈니스 로직, Streamlit 의존 없음)
@@ -76,8 +87,6 @@ except ImportError:
     CORE_AVAILABLE = False
 ```
 
-각 Tool 함수 내에서 `if CORE_AVAILABLE: ... else: # fallback` 분기를 유지한다.
-
 ---
 
 ## DB 스키마
@@ -89,7 +98,7 @@ DuckDB `accidents` 테이블: **49개 컬럼** (id, created_at, source_file + 43
 - `사망자수`, `부상자수`, `피해액(백만원)`, `최대지연시간(분)`
 - `risk_score` (DOUBLE, 0~100), `risk_grade` (Critical/High/Medium/Low)
 
-**컬럼명 주의**: `safety_core.py`는 `"최대지연시간(분)"`, `"피해액(백만원)"` (따옴표 필요한 특수문자 포함).
+**컬럼명 주의**: `safety_core.py`는 `"최대지연시간(분)"`, `"피해액(백만원)"` (따옴표 필요한 특수문자 포함).  
 `gen_data.py`는 `최대지연시간_분`, `피해액_백만원` (언더스코어, 다른 스키마).
 
 ---
@@ -118,7 +127,7 @@ Hard Constraint:
 
 | Tool | 래핑 함수 | 설명 |
 |------|-----------|------|
-| `extract_pdf_tool` | `extract_from_pdf()` | PDF → 43개 필드 추출 (5배치 LLM) |
+| `extract_pdf_tool` | `extract_from_pdf()` | PDF → 43개 필드 추출 |
 | `save_db_tool` | `insert_accident()` + `calculate_risk()` | DB 저장 + 위험도 |
 | `query_db_tool` | `get_all_accidents()` | DB 조회·필터 |
 | `assess_risk_tool` | `calculate_risk()` | 위험도만 즉시 산정 |
@@ -140,15 +149,57 @@ Hard Constraint:
 
 ---
 
-## PDF 추출 파이프라인
+## PDF 추출 파이프라인 (v1.7.0)
 
-`safety_core.extract_from_pdf()` 3단계:
-1. `pymupdf4llm.to_markdown()` → 전체 텍스트 변환
-2. `_regex_base()` → 날짜·사망·부상 정규식 추출 (기본값)
-3. LLM 5배치 병렬 추출 → `_safe_json()` 파싱 → 기존값 보강
+### 7단계 추출 흐름
 
-**배치 슬라이싱**: 각 배치는 텍스트의 다른 오프셋 구간 사용 (`BATCH_SLICE`)
-**Qwen3 대응**: 모델명에 `qwen3` 포함 시 `/no_think\n` 프리픽스 추가, `<think>` 태그 제거
+```
+[1] pymupdf4llm.to_markdown()     PDF 전체 텍스트 추출
+[2] _regex_base()                 정규식으로 날짜·기관·인명피해 즉시 추출
+[3] LLM 5배치 순차 추출            전체 보고서(28000자) × 5배치 → 43개 필드
+[4] 고장 필드 전용 재추출           고장부품명·고장현상·고장원인·조치내용이 null이면 재시도
+[5] 이벤트개요 전용 생성            LLM에게 3~5문장 요약 생성 요청 (추출이 아닌 생성)
+[6] 이벤트개요 합성 fallback       LLM 실패 시 기추출 필드로 문장 자동 조합
+[7] 데이터출처 기본값 설정          null이면 'PDF 자동 추출' 설정
+```
+
+### LLM 호출 설정
+
+```python
+ChatOllama(
+    model=model_name,
+    base_url="http://127.0.0.1:11434",
+    temperature=0,
+    num_ctx=32768,      # 한국어 장문 보고서 전체 처리
+    num_predict=4096,   # thinking 블록 포함 여유있는 출력 허용
+    reasoning=False,    # qwen3 모델만 적용 — Ollama think=false 전달
+    # format="json" 사용 금지 — 한국어 텍스트 생성 차단 확인됨
+)
+```
+
+**`format="json"` 사용 절대 금지**: Ollama의 JSON 문법 제약이 한국어 유니코드 토큰 생성을 차단해 모든 텍스트 필드가 null로 반환됨. `_safe_json()`으로 파싱 처리.
+
+### 모델명 주의
+
+**올바른 모델명**: `qwen3:32b` (반드시 `b` 포함)  
+`qwen3:32`는 Ollama에서 404 오류 발생 → 예외가 catch되어 LLM 기여 0개, 정규식만 추출됨.
+
+### 오류 처리
+
+모델 미발견(404) 시 progress_fn으로 사용자에게 명시적 오류 메시지 표시.  
+각 배치는 실패 시 1회 자동 재시도 후 skip.
+
+### 배치 구성
+
+모든 배치가 **전체 보고서(28000자)** 를 사용한다. 구간 슬라이싱 없음.
+
+| 배치 | 담당 컬럼 | 비고 |
+|------|---------|------|
+| 0 (기본정보) | COLUMNS[0:9] | 발생일시·기관·노선·이벤트분류 |
+| 1 (원인·지연) | COLUMNS[9:18] | 근본원인·직접원인·지연정보 |
+| 2 (피해·위치A) | COLUMNS[18:26] | 피해현황·위치 |
+| 3 (위치·기상) | COLUMNS[26:34] | 위치상세·기상환경 |
+| 4 (선로·고장·개요) | COLUMNS[34:] | **고장부품·조치·개요 — 한국어 강조 지시 포함** |
 
 ---
 
@@ -191,6 +242,7 @@ python gen_data.py
 pip install streamlit duckdb pandas altair pymupdf4llm openpyxl
 pip install langchain langchain-ollama langgraph
 # (주의) langchain_community ChatOllama 아닌 langchain_ollama 사용
+# langchain-ollama >= 0.3.0 필수 (reasoning 파라미터 지원)
 ```
 
 ---
@@ -203,3 +255,19 @@ pip install langchain langchain-ollama langgraph
 | High | 20% (100건) | 사망=1 |
 | Medium | 35% (175건) | 사망=0, 부상 8~19 |
 | Low | 30% (150건) | 사망=0, 부상 0~2, 장애류 |
+
+---
+
+## 버전 이력 요약
+
+| 버전 | 날짜 | 주요 변경 |
+|------|------|---------|
+| v1.7.0 | 2026-05-20 | **모델명 오타 수정** `qwen3:32` → `qwen3:32b` (핵심 버그) |
+| v1.6.0 | 2026-05-20 | format="json" 제거, 한국어 프롬프트, 이벤트개요 전용 생성 |
+| v1.5.0 | 2026-05-20 | 배치4 전체 보고서 사용, 고장 필드 재추출 패스 |
+| v1.4.0 | 2026-05-20 | reasoning=False, num_predict 4096, 버전 표시 추가 |
+| v1.3.0 | 2026-03-29 | LLM 추출 버그·DB 컬럼명 불일치 수정 |
+| v1.2.0 | 2026-03-29 | 3-레이어 아키텍처 리팩토링, ui/탭 모듈화 |
+| v1.1.0 | 2026-03-29 | CLAUDE.md·.gitignore 추가 |
+
+> 상세 변경 이력: `log.md` 참조

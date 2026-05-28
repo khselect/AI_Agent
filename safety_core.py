@@ -346,13 +346,12 @@ def _regex_base(t: str) -> dict:
     d['부상자수'] = int(inj.group(1)) if inj else 0
     return d
 
-BATCH_SLICE = [(0,10000),(3000,16000),(0,12000),(5000,18000),(8000,None)]
+_FULL_TEXT_LIMIT = 28000
 
-def _slice_text(text, idx):
-    s, e = BATCH_SLICE[idx]
-    return (text[s:e] if e else text[s:])[:12000]
+def _slice_text(text, idx=0):
+    return text[:_FULL_TEXT_LIMIT]
 
-def extract_from_pdf(pdf_bytes: bytes, model_name: str = "qwen3:32",
+def extract_from_pdf(pdf_bytes: bytes, model_name: str = "qwen3:32b",
                      progress_fn=None) -> Tuple[dict, str]:
     """
     3단계 PDF 추출 파이프라인.
@@ -373,40 +372,91 @@ def extract_from_pdf(pdf_bytes: bytes, model_name: str = "qwen3:32",
         if LLM_OK:
             llm_kwargs = dict(
                 model=model_name, base_url="http://127.0.0.1:11434",
-                temperature=0, num_ctx=32768,
-                num_predict=4096,
-                format="json",
+                temperature=0, num_ctx=32768, num_predict=4096,
             )
             if _is_qwen3(model_name):
-                llm_kwargs["reasoning"] = False  # Ollama think=false 전달 (langchain_ollama 0.3+)
+                llm_kwargs["reasoning"] = False
             llm = ChatOllama(**llm_kwargs)
-            sys_msg = SystemMessage(content="You are a structured data extractor. Output ONLY valid JSON.")
-            for i, batch_cols in enumerate(BATCHES):
-                if progress_fn:
-                    progress_fn(0.1 + i*0.17, f"배치 {i+1}/5 추출 중...")
-                guide = "\n".join(f'  - "{n}": {desc}' for n,desc in batch_cols)
-                text_chunk = _slice_text(report_text, i)
-                json_tmpl = "{" + ", ".join(f'"{n}": null' for n,_ in batch_cols) + "}"
-                prompt = (
-                    "You are a railway accident report data extractor.\n"
-                    "Extract ONLY the fields listed below from the [REPORT] and return a single JSON object.\n"
-                    "STRICT RULES:\n1. Output ONLY the JSON object — no explanation, no markdown\n"
-                    "2. Use null for missing fields\n3. Date: YYYY-MM-DD, Time: HH:MM\n"
-                    "4. Numeric fields: use numbers without quotes\n"
-                    f"FIELDS:\n{guide}\nOUTPUT TEMPLATE:\n{json_tmpl}\n[REPORT]\n{text_chunk}\nJSON:"
-                )
-                msgs = [sys_msg, HumanMessage(content=prompt)]
-                for attempt in range(2):
+            sys_msg = SystemMessage(content=(
+                "당신은 철도사고 조사보고서 분석 전문가입니다. "
+                "요청된 필드를 정확히 추출하여 JSON 객체만 출력하세요."
+            ))
+
+            def _run(prompt_text):
+                for _ in range(2):
                     try:
-                        raw = llm.invoke(msgs).content
-                        batch_result = _safe_json(raw)
-                        if batch_result:
-                            for k, v in batch_result.items():
-                                if v is not None and str(v).strip() not in ('','null','None'):
-                                    result[k] = v
-                            break
-                    except Exception:
-                        pass
+                        r = _safe_json(llm.invoke([sys_msg, HumanMessage(content=prompt_text)]).content)
+                        if r: return r
+                    except Exception: pass
+                return {}
+
+            for i, batch_cols in enumerate(BATCHES):
+                if progress_fn: progress_fn(0.1 + i*0.13, f"배치 {i+1}/5 추출 중...")
+                guide = "\n".join(f'  "{n}": {desc}' for n, desc in batch_cols)
+                json_tmpl = "{" + ", ".join(f'"{n}": null' for n,_ in batch_cols) + "}"
+                hint = (
+                    "\n[배치4] 고장부품명/고장현상/고장원인/조치내용은 보고서 전체에서 반드시 찾으세요."
+                    if i == 4 else ""
+                )
+                prompt = (
+                    "당신은 철도사고 보고서 분석 전문가입니다. 아래 필드를 추출해 JSON만 출력하세요.\n"
+                    "규칙: ①JSON만 출력 ②없는 값만 null ③날짜YYYY-MM-DD ④숫자는 따옴표 없이"
+                    f"⑤텍스트는 한국어{hint}\n\n"
+                    f"추출 필드:\n{guide}\n출력: {json_tmpl}\n\n"
+                    f"[보고서]\n{_slice_text(report_text, i)}\n\nJSON:"
+                )
+                for k, v in _run(prompt).items():
+                    if v is not None and str(v).strip() not in ('','null','None','NULL'):
+                        result[k] = v
+
+            # ── 고장 필드 전용 재추출 ─────────────────────────────────
+            FAULT_FIELDS = ["고장부품명", "고장현상", "고장원인", "조치내용"]
+            null_fault = [f for f in FAULT_FIELDS
+                          if not result.get(f) or str(result[f]).strip() in ("","null","NULL","None")]
+            if null_fault:
+                if progress_fn: progress_fn(0.76, f"고장 필드 재추출... ({', '.join(null_fault)})")
+                fault_cols = [(n, d) for n, d in COLUMNS if n in null_fault]
+                fault_guide = "\n".join(f'  "{n}": {d}' for n, d in fault_cols)
+                fault_tmpl = "{" + ", ".join(f'"{n}": null' for n in null_fault) + "}"
+                fault_prompt = (
+                    "철도사고 보고서에서 고장/조치 정보를 찾아 JSON으로 출력하세요.\n"
+                    "'고장','이상','불량','파손','결함','조치','복구','교체' 키워드 주변을 확인하세요.\n\n"
+                    f"추출 대상:\n{fault_guide}\n출력: {fault_tmpl}\n\n"
+                    f"[보고서]\n{report_text[:_FULL_TEXT_LIMIT]}\n\nJSON:"
+                )
+                for f, v in _run(fault_prompt).items():
+                    if v and str(v).strip() not in ("","null","NULL","None"):
+                        result[f] = str(v).strip()
+
+            # ── 이벤트개요 전용 생성 ─────────────────────────────────
+            if not result.get("이벤트개요") or str(result.get("이벤트개요","")).strip() in ("","null","NULL","None"):
+                if progress_fn: progress_fn(0.88, "이벤트개요 요약 생성 중...")
+                overview_prompt = (
+                    "아래 철도사고 보고서를 읽고 사고 경위, 원인, 피해, 조치를\n"
+                    "한국어 3~5문장으로 요약하여 다음 JSON으로 출력하세요:\n"
+                    "{\"이벤트개요\": \"요약 내용\"}\n\n"
+                    f"[보고서]\n{report_text[:_FULL_TEXT_LIMIT]}\n\nJSON:"
+                )
+                parsed = _run(overview_prompt)
+                val = parsed.get("이벤트개요")
+                if val and str(val).strip() not in ("","null","NULL","None"):
+                    result["이벤트개요"] = str(val).strip()
+
+            # ── 이벤트개요 합성 fallback ─────────────────────────────
+            if not result.get("이벤트개요") or str(result.get("이벤트개요","")).strip() in ("","null","NULL","None"):
+                parts = []
+                date = result.get("발생일자",""); line = result.get("노선","")
+                sub = result.get("이벤트소분류","") or result.get("이벤트대분류","사고")
+                if date or line:
+                    parts.append(f"{date} {line} 노선에서 {sub}가 발생하였습니다.".strip())
+                if result.get("주원인"):
+                    parts.append(f"주요 원인은 {result['주원인']}으로 분석됩니다.")
+                if result.get("직접원인"):
+                    parts.append(f"직접 원인: {result['직접원인']}")
+                if result.get("조치내용"):
+                    parts.append(f"조치사항: {result['조치내용']}")
+                if parts:
+                    result["이벤트개요"] = " ".join(parts)
 
         return result, report_text
 

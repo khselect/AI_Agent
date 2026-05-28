@@ -385,59 +385,55 @@ def _regex_base(t: str) -> dict:
     return d
 
 # 배치별 보고서 텍스트 슬라이스 전략
-# - 기본정보(배치0): 앞부분 집중 (제목·일시·노선)
-# - 원인·지연(배치1): 중간부분 (조사결과·원인분석)
-# - 피해·위치(배치2): 앞+중간 (피해현황·사고위치)
-# - 위치·기상(배치3): 중간+뒷부분 (현장조건·기상)
-# - 선로·고장·개요(배치4): 뒷부분 전체 (기술분석·조치)
-BATCH_SLICE = [
-    (0,    10000),   # 배치0 기본정보: 앞 10000자
-    (3000, 16000),   # 배치1 원인·지연: 3000~16000자
-    (0,    12000),   # 배치2 피해·위치A: 앞 12000자
-    (5000, 18000),   # 배치3 위치·기상: 5000~18000자
-    (8000, None),    # 배치4 선로·고장·개요: 8000자 이후 전체
-]
+_FULL_TEXT_LIMIT = 28000  # 정확도 우선 — 모든 배치가 전체 보고서 사용
 
-def _slice_text(report_text: str, batch_idx: int) -> str:
-    """배치 인덱스에 따라 보고서 적절 구간 추출. 최대 12000자."""
-    start, end = BATCH_SLICE[batch_idx]
-    chunk = report_text[start:end] if end else report_text[start:]
-    return chunk[:12000]  # 안전 상한 (num_ctx=32768 기준)
+def _slice_text(report_text: str, batch_idx: int = 0) -> str:
+    """모든 배치에 전체 보고서를 제공 (정확도 우선)."""
+    return report_text[:_FULL_TEXT_LIMIT]
+
+# 배치별 필드 추출 힌트 (한국어, 값을 찾는 단서 제공)
+_BATCH_HINTS = {
+    0: "",  # 기본정보: 힌트 불필요
+    1: "",  # 원인·지연: 힌트 불필요
+    2: "",  # 피해·위치: 힌트 불필요
+    3: "",  # 위치·기상: 힌트 불필요
+    4: (
+        "\n\n[배치4 추출 지침 — 반드시 준수]\n"
+        "아래 필드는 보고서의 어느 위치에든 있을 수 있습니다. 전체 보고서를 꼼꼼히 읽고 추출하세요.\n"
+        "- 고장부품명: 고장·손상된 부품/장치명 (예: 선로전환기, 전동기, 신호기, 제동장치 등)\n"
+        "- 고장현상: 실제 발생한 고장/이상 증상 (예: 동작불량, 신호현시불능, 절연파괴 등)\n"
+        "- 고장원인: 기술적 고장 원인 (예: 부품 노후, 접촉불량, 소프트웨어 오류, 외부충격 등)\n"
+        "- 조치내용: 사고/장애 발생 후 취한 모든 조치 (예: 현장출동, 부품교체, 열차억류, 대피유도 등)\n"
+        "- 이벤트개요: 위 보고서 내용을 바탕으로 한국어 3~5문장으로 사고 개요를 직접 작성하세요\n"
+    ),
+}
 
 def _build_batch_prompt(batch_cols, report_text, model_name, batch_idx=0):
-    prefix = "/no_think\n" if _is_qwen3(model_name) else ""
-    schema_keys = ", ".join(f'"{n}"' for n, _ in batch_cols)
-    guide = "\n".join(f'  - "{n}": {desc}' for n, desc in batch_cols)
     text_chunk = _slice_text(report_text, batch_idx)
-
-    # Few-shot 예시 (숫자 필드 명확화)
-    num_fields = {n for n, d in batch_cols if any(k in d for k in ['숫자','수','분','℃','mm','cm'])}
-    num_note = ""
-    if num_fields:
-        examples = ", ".join(f'"{n}": 0' for n in list(num_fields)[:3])
-        num_note = f'\n숫자 필드는 따옴표 없이 숫자로만. 예: {{{examples}}}\n'
-
-    # 출력 템플릿: 키=null 형태로 LLM이 구조 그대로 채우도록
+    guide_lines = []
+    for n, desc in batch_cols:
+        guide_lines.append(f'  "{n}": {desc}')
+    guide = "\n".join(guide_lines)
     json_template = "{" + ", ".join(f'"{n}": null' for n, _ in batch_cols) + "}"
+    hint = _BATCH_HINTS.get(batch_idx, "")
 
-    return f"""{prefix}You are a railway accident report data extractor.
-Extract ONLY the fields listed below from the [REPORT] and return a single JSON object.
-
-STRICT RULES:
-1. Output ONLY the JSON object — no explanation, no markdown, no code blocks
-2. Use null for missing or unclear fields
-3. Date format: "YYYY-MM-DD", Time format: "HH:MM"
-4. Numeric fields: use numbers without quotes (e.g. 3, not "3"){num_note}
-FIELDS TO EXTRACT:
-{guide}
-
-OUTPUT TEMPLATE (fill in the values, keep null if not found):
-{json_template}
-
-[REPORT]
-{text_chunk}
-
-JSON:"""
+    return (
+        "당신은 철도사고 조사보고서 분석 전문가입니다.\n"
+        "아래 [보고서]에서 지정된 필드 값을 추출하여 JSON 객체 하나만 출력하세요.\n\n"
+        "【규칙】\n"
+        "1. JSON 객체만 출력 — 설명·마크다운·코드블록 금지\n"
+        "2. 보고서에 없는 정보만 null 사용 (있으면 반드시 추출)\n"
+        "3. 날짜: YYYY-MM-DD, 시간: HH:MM\n"
+        "4. 숫자 필드: 따옴표 없이 숫자만 (예: 3, 15.5)\n"
+        f"5. 모든 텍스트 값은 한국어로 작성{hint}\n\n"
+        "【추출 필드】\n"
+        f"{guide}\n\n"
+        "【출력 형식】\n"
+        f"{json_template}\n\n"
+        "【보고서 전문】\n"
+        f"{text_chunk}\n\n"
+        "JSON 출력:"
+    )
 
 def extract_from_pdf(pdf_bytes: bytes, model_name: str, progress_fn=None) -> tuple:
     if not PDF_AVAILABLE:
@@ -452,40 +448,120 @@ def extract_from_pdf(pdf_bytes: bytes, model_name: str, progress_fn=None) -> tup
         result = _regex_base(report_text)
 
         if LLM_AVAILABLE:
+            # format="json" 제거 — Ollama JSON 문법 제약이 한국어 텍스트 생성을 차단함
             llm_kwargs = dict(
                 model=model_name, base_url="http://127.0.0.1:11434",
                 temperature=0,
                 num_ctx=32768,
                 num_predict=4096,
-                format="json",
             )
             if _is_qwen3(model_name):
-                llm_kwargs["reasoning"] = False  # Ollama think=false 전달 (langchain_ollama 0.3+)
+                llm_kwargs["reasoning"] = False
             llm = ChatOllama(**llm_kwargs)
             sys_msg = SystemMessage(content=(
-                "You are a structured data extractor. "
-                "Output ONLY a valid JSON object. "
-                "No markdown, no code blocks, no explanations."
+                "당신은 철도사고 조사보고서 분석 전문가입니다. "
+                "요청된 필드를 보고서에서 정확히 추출하여 JSON 객체만 출력하세요. "
+                "설명, 마크다운, 코드블록 없이 JSON만 출력합니다."
             ))
-            for i, batch in enumerate(BATCHES):
-                pct = 0.15 + 0.65 * i / len(BATCHES)
-                if progress_fn: progress_fn(pct, f"🤖 배치 {i+1}/{len(BATCHES)}: {BATCH_NAMES[i]} 추출 중...")
-                prompt = _build_batch_prompt(batch, report_text, model_name, batch_idx=i)
-                msgs = [sys_msg, HumanMessage(content=prompt)]
-                batch_result = {}
+
+            def _run_batch(prompt_text, cols, label=""):
+                msgs = [sys_msg, HumanMessage(content=prompt_text)]
                 for attempt in range(2):
                     try:
                         resp = llm.invoke(msgs)
-                        batch_result = _safe_json(resp.content)
-                        if batch_result:
-                            break
+                        parsed = _safe_json(resp.content)
+                        if parsed:
+                            return parsed
                     except Exception as e:
+                        err = str(e)
+                        if "not found" in err or "404" in err:
+                            if progress_fn:
+                                progress_fn(0, f"❌ 모델 '{model_name}' 을 찾을 수 없습니다. Ollama에서 모델명을 확인하세요.")
+                            return {}
                         if attempt == 1 and progress_fn:
-                            progress_fn(pct, f"⚠️ 배치 {i+1} 오류: {e}")
+                            progress_fn(0, f"⚠️ {label} LLM 오류: {err[:120]}")
+                return {}
+
+            # ── 배치 추출 (5배치, 모두 전체 보고서 사용) ─────────────────
+            for i, batch in enumerate(BATCHES):
+                pct = 0.15 + 0.55 * i / len(BATCHES)
+                if progress_fn: progress_fn(pct, f"🤖 배치 {i+1}/{len(BATCHES)}: {BATCH_NAMES[i]} 추출 중...")
+                prompt = _build_batch_prompt(batch, report_text, model_name, batch_idx=i)
+                batch_result = _run_batch(prompt, batch, label=f"배치{i+1}")
                 for col_name, _ in batch:
                     val = batch_result.get(col_name)
                     if val is not None and str(val).strip() not in ("","null","NULL","None",""):
                         result[col_name] = str(val).strip()
+
+            # ── 고장 5개 필드 전용 재추출 ─────────────────────────────────
+            FAULT_FIELDS = ["고장부품명", "고장현상", "고장원인", "조치내용"]
+            null_fault = [f for f in FAULT_FIELDS
+                          if not result.get(f) or str(result[f]).strip() in ("","null","NULL","None")]
+            if null_fault:
+                if progress_fn: progress_fn(0.75, f"🔧 고장 필드 재추출 중... ({', '.join(null_fault)})")
+                fault_cols = [(n, d) for n, d in COLUMNS if n in null_fault]
+                fault_guide = "\n".join(
+                    f'  "{n}": {d}  ← 반드시 추출 (없으면 null)' for n, d in fault_cols
+                )
+                fault_tmpl = "{" + ", ".join(f'"{n}": null' for n in null_fault) + "}"
+                fault_prompt = (
+                    "당신은 철도사고 보고서 분석 전문가입니다.\n"
+                    "아래 보고서에서 고장/조치 관련 정보를 반드시 찾아 JSON으로 출력하세요.\n\n"
+                    "보고서에 '고장', '이상', '불량', '파손', '결함', '조치', '복구', '교체' 등의\n"
+                    "키워드 주변에서 해당 정보를 찾을 수 있습니다.\n\n"
+                    f"【추출 대상】\n{fault_guide}\n\n"
+                    f"【출력】{fault_tmpl}\n\n"
+                    f"【보고서】\n{report_text[:_FULL_TEXT_LIMIT]}\n\n"
+                    "JSON:"
+                )
+                fault_result = _run_batch(fault_prompt, fault_cols)
+                for f in null_fault:
+                    val = fault_result.get(f)
+                    if val and str(val).strip() not in ("","null","NULL","None"):
+                        result[f] = str(val).strip()
+
+            # ── 이벤트개요 전용 요약 생성 ─────────────────────────────────
+            if not result.get("이벤트개요") or str(result.get("이벤트개요","")).strip() in ("","null","NULL","None"):
+                if progress_fn: progress_fn(0.87, "📝 이벤트개요 요약 생성 중...")
+                ctx_parts = []
+                for k in ["발생일자","노선","이벤트소분류","주원인","직접원인","사망자수","부상자수","조치내용"]:
+                    if result.get(k): ctx_parts.append(f"{k}: {result[k]}")
+                ctx_hint = "\n".join(ctx_parts)
+                overview_prompt = (
+                    "당신은 철도사고 조사보고서 분석 전문가입니다.\n"
+                    "아래 보고서를 읽고 사고/장애의 발생 경위, 원인, 피해 규모, 조치 내용을\n"
+                    "포함하여 한국어 3~5문장으로 요약하세요.\n"
+                    "JSON 형식으로 다음 키 하나만 출력하세요: {\"이벤트개요\": \"요약 내용\"}\n\n"
+                    + (f"[추출된 기본 정보]\n{ctx_hint}\n\n" if ctx_hint else "")
+                    + f"[보고서 전문]\n{report_text[:_FULL_TEXT_LIMIT]}\n\n"
+                    "JSON:"
+                )
+                for attempt in range(2):
+                    try:
+                        resp = llm.invoke([sys_msg, HumanMessage(content=overview_prompt)])
+                        parsed = _safe_json(resp.content)
+                        val = parsed.get("이벤트개요")
+                        if val and str(val).strip() not in ("","null","NULL","None"):
+                            result["이벤트개요"] = str(val).strip()
+                            break
+                    except Exception:
+                        pass
+
+            # ── 이벤트개요 최종 합성 fallback (LLM 실패 시) ──────────────
+            if not result.get("이벤트개요") or str(result.get("이벤트개요","")).strip() in ("","null","NULL","None"):
+                parts = []
+                date = result.get("발생일자",""); line = result.get("노선","")
+                sub = result.get("이벤트소분류","") or result.get("이벤트대분류","사고")
+                if date or line:
+                    parts.append(f"{date} {line} 노선에서 {sub}가 발생하였습니다.".strip())
+                if result.get("주원인"):
+                    parts.append(f"주요 원인은 {result['주원인']}으로 분석됩니다.")
+                if result.get("직접원인"):
+                    parts.append(f"직접 원인: {result['직접원인']}")
+                if result.get("조치내용"):
+                    parts.append(f"조치사항: {result['조치내용']}")
+                if parts:
+                    result["이벤트개요"] = " ".join(parts)
 
         result['데이터출처'] = result.get('데이터출처') or 'PDF 자동 추출'
         # 추출률 계산 및 로깅
@@ -507,13 +583,13 @@ def extract_from_pdf(pdf_bytes: bytes, model_name: str, progress_fn=None) -> tup
 # ══════════════════════════════════════════════════════════════
 st.set_page_config(page_title="🚄 철도사고 위험도 평가 AI에이전트", layout="wide", initial_sidebar_state="expanded")
 st.title("🚄 철도사고 위험도 평가 AI에이전트")
-st.caption("v1.4.0 · commit `b4ba128` · [GitHub](https://github.com/khselect/AI_Agent)")
+st.caption("v1.7.0 · commit `fff5628` · [GitHub](https://github.com/khselect/AI_Agent)")
 
 # ── 사이드바 ──────────────────────────────────────────────────
 with st.sidebar:
     st.header("⚙️ 설정")
     CONFIG_FILE = os.path.join(SHARED_DIR, "system_config.json")
-    default_model = "qwen3:32"
+    default_model = "qwen3:32b"
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE) as f:
@@ -521,13 +597,13 @@ with st.sidebar:
         except Exception:
             pass
 
-    MODELS = ["qwen3:32","qwen3:8b","qwen2.5:7b-instruct","llama3.1:8b"]
+    MODELS = ["qwen3:32b", "qwen3:8b", "qwen2.5:7b-instruct", "llama3.1:8b"]
     try: midx = MODELS.index(default_model)
-    except ValueError: midx = 1
+    except ValueError: midx = 0
 
     model_name = st.selectbox("🤖 LLM 모델", MODELS, index=midx)
     if _is_qwen3(model_name):
-        st.info("💡 qwen3: /no_think 자동 적용")
+        st.info("💡 qwen3: thinking 비활성화 적용")
 
     st.divider()
     total_records = get_accident_count()

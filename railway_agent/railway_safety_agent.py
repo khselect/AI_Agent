@@ -95,13 +95,13 @@ class AgentState(TypedDict):
 # ══════════════════════════════════════════════════════════════
 
 @tool
-def extract_pdf_tool(pdf_path: str, model_name: str = "qwen2.5:3b") -> str:
+def extract_pdf_tool(pdf_path: str, model_name: str = "qwen3:32b") -> str:
     """
     [Tool ①] PDF 사고조사보고서에서 43개 표준 필드를 자동 추출합니다.
     
     Args:
         pdf_path  : 로컬 PDF 파일 경로 (절대경로 권장)
-        model_name: Ollama 모델명 (기본: qwen2.5:3b)
+        model_name: Ollama 모델명 (기본: qwen3:32b)
     
     Returns:
         JSON 문자열 — 추출된 43개 필드
@@ -512,7 +512,7 @@ TOOLS = [
     notify_tool,
 ]
 
-def build_agent(model_name: str = "qwen2.5:3b"):
+def build_agent(model_name: str = "qwen3:32b"):
     """
     LangGraph StateGraph 기반 에이전트를 생성합니다.
     
@@ -623,7 +623,7 @@ def build_agent(model_name: str = "qwen2.5:3b"):
 # STEP 4. 에이전트 실행 헬퍼
 # ══════════════════════════════════════════════════════════════
 
-def run_agent(goal: str, model_name: str = "qwen2.5:3b") -> str:
+def run_agent(goal: str, model_name: str = "qwen3:32b") -> str:
     """
     에이전트에 목표를 부여하고 실행합니다.
     
@@ -679,7 +679,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="철도안전 AI 에이전트")
     parser.add_argument("--goal", type=str, default="", help="목표 문자열")
-    parser.add_argument("--model", type=str, default="qwen2.5:3b", help="Ollama 모델명")
+    parser.add_argument("--model", type=str, default="qwen3:32b", help="Ollama 모델명")
     parser.add_argument("--demo", type=str, default="",
                         help="데모 시나리오 선택: query_high / assess / scenario / pdf")
     args = parser.parse_args()
