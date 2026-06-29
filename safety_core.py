@@ -351,7 +351,7 @@ _FULL_TEXT_LIMIT = 28000
 def _slice_text(text, idx=0):
     return text[:_FULL_TEXT_LIMIT]
 
-def extract_from_pdf(pdf_bytes: bytes, model_name: str = "qwen3:32b",
+def extract_from_pdf(pdf_bytes: bytes, model_name: str = "qwen3:30b-a3b",
                      progress_fn=None) -> Tuple[dict, str]:
     """
     3단계 PDF 추출 파이프라인.

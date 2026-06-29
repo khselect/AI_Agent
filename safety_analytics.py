@@ -589,7 +589,7 @@ st.caption("v1.7.0 · commit `fff5628` · [GitHub](https://github.com/khselect/A
 with st.sidebar:
     st.header("⚙️ 설정")
     CONFIG_FILE = os.path.join(SHARED_DIR, "system_config.json")
-    default_model = "qwen3:32b"
+    default_model = "qwen3:30b-a3b"
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE) as f:
@@ -597,7 +597,7 @@ with st.sidebar:
         except Exception:
             pass
 
-    MODELS = ["qwen3:32b", "qwen3:8b", "qwen2.5:7b-instruct", "llama3.1:8b"]
+    MODELS = ["qwen3:30b-a3b", "qwen3:32b", "qwen3:8b", "qwen2.5:7b-instruct", "llama3.1:8b"]
     try: midx = MODELS.index(default_model)
     except ValueError: midx = 0
 

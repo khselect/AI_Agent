@@ -23,8 +23,8 @@
 
 - **UI**: Streamlit (`safety_analytics.py`)
 - **에이전트**: LangGraph + Ollama (`railway_agent/railway_safety_agent.py`)
-- **LLM**: Ollama 로컬 서버 (`http://127.0.0.1:11434`), 기본 모델 `qwen3:32b`
-- **현재 버전**: v1.7.0 (추출률 95%+)
+- **LLM**: Ollama 로컬 서버 (`http://127.0.0.1:11434`), 기본 모델 `qwen3:30b-a3b`
+- **현재 버전**: v1.7.1 (추출률 95%+)
 
 ---
 
@@ -181,7 +181,8 @@ ChatOllama(
 
 ### 모델명 주의
 
-**올바른 모델명**: `qwen3:32b` (반드시 `b` 포함)  
+**기본 모델**: `qwen3:30b-a3b` (MoE, 24GB RAM 최적)  
+**대안 모델**: `qwen3:32b` (고품질, RAM 여유 필요), `qwen3:8b` (빠름)  
 `qwen3:32`는 Ollama에서 404 오류 발생 → 예외가 catch되어 LLM 기여 0개, 정규식만 추출됨.
 
 ### 오류 처리

@@ -250,7 +250,7 @@ WORKFLOWS = {
 # ══════════════════════════════════════════════════════════════
 # 메인 렌더러
 # ══════════════════════════════════════════════════════════════
-def render_agent_tab(model_name: str = "qwen3:32b"):
+def render_agent_tab(model_name: str = "qwen3:30b-a3b"):
     st.subheader("🤖 AI 에이전트 — 자율 업무 자동화")
 
     sub_exec, sub_recipients, sub_log = st.tabs([
