@@ -302,6 +302,8 @@ COLUMNS = [
 ]
 BATCHES = [COLUMNS[0:9], COLUMNS[9:18], COLUMNS[18:26], COLUMNS[26:34], COLUMNS[34:]]
 
+DEFAULT_MODEL = "qwen3:30b-a3b"   # 기본 LLM (extract_cli / UI 공유 단일 출처)
+
 def _is_qwen3(m): return "qwen3" in m.lower()
 
 def _clean_llm(raw: str) -> str:
@@ -351,7 +353,7 @@ _FULL_TEXT_LIMIT = 28000
 def _slice_text(text, idx=0):
     return text[:_FULL_TEXT_LIMIT]
 
-def extract_from_pdf(pdf_bytes: bytes, model_name: str = "qwen3:30b-a3b",
+def extract_from_pdf(pdf_bytes: bytes, model_name: str = DEFAULT_MODEL,
                      progress_fn=None) -> Tuple[dict, str]:
     """
     3단계 PDF 추출 파이프라인.
@@ -372,7 +374,8 @@ def extract_from_pdf(pdf_bytes: bytes, model_name: str = "qwen3:30b-a3b",
         if LLM_OK:
             llm_kwargs = dict(
                 model=model_name, base_url="http://127.0.0.1:11434",
-                temperature=0, num_ctx=32768, num_predict=4096,
+                temperature=0, num_ctx=16384, num_predict=4096,
+                keep_alive="30m",   # 모델 상주 — 연속 처리 시 파일마다 재로딩 제거
             )
             if _is_qwen3(model_name):
                 llm_kwargs["reasoning"] = False

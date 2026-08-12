@@ -394,7 +394,24 @@ def _slice_text(report_text: str, batch_idx: int = 0) -> str:
 # 배치별 필드 추출 힌트 (한국어, 값을 찾는 단서 제공)
 _BATCH_HINTS = {
     0: "",  # 기본정보: 힌트 불필요
-    1: "",  # 원인·지연: 힌트 불필요
+    1: (   # 원인·지연: 분류형 필드 추출 지침 (분류·파생 유도로 누락 방지)
+        "\n\n[배치2 추출 지침 — 원인·지연 분석. 반드시 준수]\n"
+        "보고서의 '원인', '분석', '고찰', '지연', '조치', '결론' 관련 서술을 근거로 아래를 채우세요.\n"
+        "- 근본원인그룹: 근본 원인을 다음 중 하나로 분류 — 인적요인(운전·취급·판단·정비 실수), "
+        "기술적요인(설비·차량·부품·시설 결함/노후), 환경적요인(기상·외부충격·자연). "
+        "원인이 서술돼 있으면 반드시 하나를 선택\n"
+        "- 근본원인유형: 근본원인의 세부 유형 (예: 운전취급, 신호취급, 열차차량설비, 선로시설, 전기설비, 유지보수 등)\n"
+        "- 근본원인상세: 근본 원인을 구체적으로 설명한 문장\n"
+        "- 직접원인: 사고를 직접 촉발한 방아쇠 (근본원인과 구분 — 사고 직전 요인)\n"
+        "- 운행영향유형: 운행 영향을 다음 중 하나로 — 운행중단, 지연운행, 서행운전. "
+        "열차가 중단·지연·서행했으면 반드시 하나를 선택\n"
+        "- 지연여부: 지연·운휴·서행이 있었으면 '지연', 전혀 없으면 '무지연'\n"
+        "- 지연원인: 지연이 발생한 주된 이유 (지연이 있으면 반드시 추출)\n"
+        "- 지연원인상세: 지연 상황을 구체적으로 설명한 문장\n"
+        "- 지연열차수: 지연·운휴된 열차 편수 (숫자만)\n"
+        "분류형 필드(근본원인그룹, 운행영향유형)는 보고서에 원인·영향이 서술돼 있으면 "
+        "맥락으로 판단해 반드시 채우고, 근거가 전혀 없을 때만 null 로 두세요.\n"
+    ),
     2: "",  # 피해·위치: 힌트 불필요
     3: "",  # 위치·기상: 힌트 불필요
     4: (
@@ -452,8 +469,9 @@ def extract_from_pdf(pdf_bytes: bytes, model_name: str, progress_fn=None) -> tup
             llm_kwargs = dict(
                 model=model_name, base_url="http://127.0.0.1:11434",
                 temperature=0,
-                num_ctx=32768,
+                num_ctx=16384,      # 32768→16384: 텍스트 전량 수용, 스왑 완화로 속도 이득
                 num_predict=4096,
+                keep_alive="30m",   # 모델 상주 — 연속 처리 시 파일마다 재로딩 제거
             )
             if _is_qwen3(model_name):
                 llm_kwargs["reasoning"] = False
@@ -583,7 +601,27 @@ def extract_from_pdf(pdf_bytes: bytes, model_name: str, progress_fn=None) -> tup
 # ══════════════════════════════════════════════════════════════
 st.set_page_config(page_title="🚄 철도사고 위험도 평가 AI에이전트", layout="wide", initial_sidebar_state="expanded")
 st.title("🚄 철도사고 위험도 평가 AI에이전트")
-st.caption("v1.7.0 · commit `fff5628` · [GitHub](https://github.com/khselect/AI_Agent)")
+
+
+APP_VERSION = "v1.7.3"
+
+
+@st.cache_data(show_spinner=False)
+def _git_short_hash() -> str:
+    """현재 체크아웃된 커밋의 짧은 해시를 런타임에 조회 (실패 시 'unknown')."""
+    import subprocess
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+            stderr=subprocess.DEVNULL,
+        ).decode().strip()
+    except Exception:
+        return "unknown"
+
+
+st.caption(f"{APP_VERSION} · commit `{_git_short_hash()}` · "
+           "[GitHub](https://github.com/khselect/AI_Agent)")
 
 # ── 사이드바 ──────────────────────────────────────────────────
 with st.sidebar:
