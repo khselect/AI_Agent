@@ -23,7 +23,7 @@
 
 - **UI**: Streamlit (`safety_analytics.py`)
 - **에이전트**: LangGraph + Ollama (`railway_agent/railway_safety_agent.py`)
-- **LLM**: Ollama 로컬 서버 (`http://127.0.0.1:11434`), 기본 모델 `qwen3:30b-a3b`
+- **LLM**: Ollama 로컬 서버 (`http://127.0.0.1:11434`), 기본 모델 `qwen3:8b`
 - **현재 버전**: v1.7.1 (추출률 95%+)
 
 ---
@@ -181,8 +181,10 @@ ChatOllama(
 
 ### 모델명 주의
 
-**기본 모델**: `qwen3:30b-a3b` (MoE, 24GB RAM 최적)  
-**대안 모델**: `qwen3:32b` (고품질, RAM 여유 필요), `qwen3:8b` (빠름)  
+**기본 모델**: `qwen3:8b` (~7.4GB, 24GB 램에서 100% GPU 상주 → 스왑 없음, 30b 대비 ~3.3배)  
+**대안 모델**: `qwen3:30b-a3b` (MoE 20GB — 24GB 램에선 12% CPU 스필+스왑 발생), `qwen3:32b` (고품질, RAM 여유 필요)  
+> v1.7.4에서 30b→8b 전환. 8b가 추출률 43/43로 30b(37~40/43)보다 오히려 우수하며,
+> 고장/직접원인 과추출은 프롬프트 정밀화(피해내역·점검표 나열 금지)로 해결.
 `qwen3:32`는 Ollama에서 404 오류 발생 → 예외가 catch되어 LLM 기여 0개, 정규식만 추출됨.
 
 ### 오류 처리

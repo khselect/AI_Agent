@@ -302,7 +302,9 @@ COLUMNS = [
 ]
 BATCHES = [COLUMNS[0:9], COLUMNS[9:18], COLUMNS[18:26], COLUMNS[26:34], COLUMNS[34:]]
 
-DEFAULT_MODEL = "qwen3:30b-a3b"   # 기본 LLM (extract_cli / UI 공유 단일 출처)
+DEFAULT_MODEL = "qwen3:8b"   # 기본 LLM (extract_cli / UI 공유 단일 출처)
+# 8b 채택(v1.7.4): 24GB 램에서 100% GPU 상주(7.4GB)로 스왑 소멸, 30b(20GB, 12% CPU 스필)
+# 대비 ~3.3배 빠름 + 추출률 43/43. 고장/직접원인 과추출은 프롬프트 정밀화로 해결. 검증: log.md v1.7.4
 
 def _is_qwen3(m): return "qwen3" in m.lower()
 
@@ -398,7 +400,8 @@ def extract_from_pdf(pdf_bytes: bytes, model_name: str = DEFAULT_MODEL,
                 guide = "\n".join(f'  "{n}": {desc}' for n, desc in batch_cols)
                 json_tmpl = "{" + ", ".join(f'"{n}": null' for n,_ in batch_cols) + "}"
                 hint = (
-                    "\n[배치4] 고장부품명/고장현상/고장원인/조치내용은 보고서 전체에서 반드시 찾으세요."
+                    "\n[배치4] 고장부품명은 사고의 직접 원인이 된 핵심 부품 1~2개만(피해내역·교체목록·점검표 전체 나열 금지, "
+                    "특정 고장부품 없으면 원인 요소만 또는 null). 고장원인은 근본 원인을 한 문장으로(부품 나열 금지)."
                     if i == 4 else ""
                 )
                 prompt = (
@@ -422,8 +425,9 @@ def extract_from_pdf(pdf_bytes: bytes, model_name: str = DEFAULT_MODEL,
                 fault_guide = "\n".join(f'  "{n}": {d}' for n, d in fault_cols)
                 fault_tmpl = "{" + ", ".join(f'"{n}": null' for n in null_fault) + "}"
                 fault_prompt = (
-                    "철도사고 보고서에서 고장/조치 정보를 찾아 JSON으로 출력하세요.\n"
-                    "'고장','이상','불량','파손','결함','조치','복구','교체' 키워드 주변을 확인하세요.\n\n"
+                    "철도사고 보고서에서 고장/조치의 핵심 정보만 간결히 추출해 JSON으로 출력하세요.\n"
+                    "고장부품명: 사고의 직접 원인이 된 핵심 부품 1~2개만(피해내역·교체목록·점검표 전체 나열 금지, "
+                    "특정 고장부품 없으면 원인 요소만 또는 null). 고장원인: 근본 원인을 한 문장으로(부품 나열 금지).\n\n"
                     f"추출 대상:\n{fault_guide}\n출력: {fault_tmpl}\n\n"
                     f"[보고서]\n{report_text[:_FULL_TEXT_LIMIT]}\n\nJSON:"
                 )
