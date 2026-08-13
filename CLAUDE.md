@@ -24,7 +24,7 @@
 - **UI**: Streamlit (`safety_analytics.py`)
 - **에이전트**: LangGraph + Ollama (`railway_agent/railway_safety_agent.py`)
 - **LLM**: Ollama 로컬 서버 (`http://127.0.0.1:11434`), 기본 모델 `qwen3:8b`
-- **현재 버전**: v1.7.1 (추출률 95%+)
+- **현재 버전**: v1.7.4 (기본 모델 qwen3:8b, 추출률 43/43)
 
 ---
 
@@ -170,9 +170,10 @@ ChatOllama(
     model=model_name,
     base_url="http://127.0.0.1:11434",
     temperature=0,
-    num_ctx=32768,      # 한국어 장문 보고서 전체 처리
-    num_predict=4096,   # thinking 블록 포함 여유있는 출력 허용
-    reasoning=False,    # qwen3 모델만 적용 — Ollama think=false 전달
+    num_ctx=16384,       # v1.7.3: 32768→16384 (입력 토큰 불변 확인, 스왑 완화)
+    num_predict=4096,    # thinking 블록 포함 여유있는 출력 허용
+    keep_alive="30m",    # v1.7.3: 모델 상주 — 연속 처리 시 재로딩 제거
+    reasoning=False,     # qwen3 모델만 적용 — Ollama think=false 전달
     # format="json" 사용 금지 — 한국어 텍스트 생성 차단 확인됨
 )
 ```
@@ -265,6 +266,10 @@ pip install langchain langchain-ollama langgraph
 
 | 버전 | 날짜 | 주요 변경 |
 |------|------|---------|
+| v1.7.4 | 2026-08-13 | **기본 모델 30b→`qwen3:8b`** (24GB 램 스왑 병목 해결, 속도 ~3.3배) + 고장/직접원인 과추출 정밀화 |
+| v1.7.3 | 2026-08-07 | 정확도 무위험 성능 개선(num_ctx 16384, keep_alive 30m, `extract_cli.py`) + 배치2 추출률 개선 |
+| v1.7.2 | 2026-06-29 | 기본 모델 `qwen3:32b` → `qwen3:30b-a3b` 변경 |
+| v1.7.1 | 2026-05-28 | PDF 추출+DB저장 소요시간 표시 기능 추가 |
 | v1.7.0 | 2026-05-20 | **모델명 오타 수정** `qwen3:32` → `qwen3:32b` (핵심 버그) |
 | v1.6.0 | 2026-05-20 | format="json" 제거, 한국어 프롬프트, 이벤트개요 전용 생성 |
 | v1.5.0 | 2026-05-20 | 배치4 전체 보고서 사용, 고장 필드 재추출 패스 |
