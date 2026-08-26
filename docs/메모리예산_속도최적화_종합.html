@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>메모리 예산 관점 — 속도 최적화 종합</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.5.0/dist/tabler-icons.min.css">
+<style>
+:root{
+  --surface-2:#ffffff; --surface-1:#faf9f5; --surface-0:#f0eee6;
+  --text-primary:#1a1a18; --text-secondary:#57564f; --text-muted:#8a8980;
+  --text-accent:#185fa5; --text-danger:#a32d2d; --text-success:#0f6e56; --text-warning:#854f0b; --text-purple:#3c3489;
+  --bg-accent:#e6f1fb; --bg-danger:#fcebeb; --bg-success:#e1f5ee; --bg-warning:#faeeda; --bg-purple:#eeedfe;
+  --border:#e5e3da; --border-strong:#d3d1c7;
+  --border-accent:#378add; --border-danger:#e24b4a; --border-success:#1d9e75; --border-warning:#ba7517; --border-purple:#7f77dd;
+  --radius:8px; --pad-md:16px; --gap-sm:12px;
+  --font-sans:-apple-system,BlinkMacSystemFont,"Segoe UI","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --font-mono:"SF Mono",Menlo,Monaco,Consolas,"D2Coding",monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --surface-2:#26251f; --surface-1:#1f1e19; --surface-0:#161511;
+    --text-primary:#ecebe3; --text-secondary:#b4b2a9; --text-muted:#8a8980;
+    --text-accent:#85b7eb; --text-danger:#f09595; --text-success:#5dcaa5; --text-warning:#fac775; --text-purple:#afa9ec;
+    --bg-accent:#0c447c; --bg-danger:#501313; --bg-success:#085041; --bg-warning:#633806; --bg-purple:#3c3489;
+    --border:#3a3833; --border-strong:#4a4842;
+    --border-accent:#378add; --border-danger:#e24b4a; --border-success:#1d9e75; --border-warning:#ba7517; --border-purple:#7f77dd;
+  }
+}
+*{box-sizing:border-box;}
+body{margin:0; background:var(--surface-0); color:var(--text-primary); font-family:var(--font-sans); line-height:1.7; padding:2rem 1rem;}
+.wrap{max-width:860px; margin:0 auto;}
+h1{font-size:22px; font-weight:500; margin:0 0 .25rem;}
+h2.sec{font-size:18px; font-weight:500; margin:2.25rem 0 .75rem; padding-top:1.25rem; border-top:1px solid var(--border);}
+.sub{font-size:14px; color:var(--text-secondary); margin-bottom:1.25rem;}
+.lead{font-size:13px; color:var(--text-secondary); margin:-.25rem 0 1rem;}
+.sr-only{position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); border:0;}
+code{font-family:var(--font-mono); font-size:.9em;}
+p{margin:0 0 1rem;}
+.card{background:var(--surface-1); border:1px solid var(--border); border-radius:12px; padding:var(--pad-md);}
+.grid3{display:grid; grid-template-columns:1fr 1fr 1fr; gap:var(--gap-sm);}
+.grid2{display:grid; grid-template-columns:1fr 1fr; gap:var(--gap-sm);}
+@media(max-width:640px){.grid3,.grid2{grid-template-columns:1fr;}}
+.seg{display:flex; align-items:center; justify-content:center; font-size:11px; color:#fff; font-weight:500; height:100%; overflow:hidden; white-space:nowrap;}
+label.f{display:block; font-size:12px; color:var(--text-secondary); margin:0 0 4px;}
+select{padding:7px; border-radius:var(--radius); border:1px solid var(--border-strong); background:var(--surface-2); color:var(--text-primary); font-family:var(--font-sans); font-size:13px; width:100%;}
+.tgl{display:flex; align-items:center; gap:8px; padding:8px 10px; border:1px solid var(--border-strong); border-radius:8px; background:var(--surface-2); cursor:pointer; font-size:13px;}
+.tgl.on{border-color:var(--border-success); background:var(--bg-success);}
+.dot{width:16px;height:16px;border-radius:4px;border:1.5px solid var(--border-strong);flex:none;display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px;}
+.tgl.on .dot{background:var(--text-success);border-color:var(--text-success);}
+.chip{display:inline-flex; align-items:center; gap:5px; font-size:11.5px; padding:2px 8px; border-radius:999px; font-weight:500;}
+th,td{text-align:left; padding:9px 10px; font-size:13px; border-bottom:1px solid var(--border); vertical-align:top;}
+th{color:var(--text-secondary); font-weight:500; font-size:12px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h2 class="sr-only">24GB 통합 메모리 맥에서 로컬 LLM PDF 추출 속도의 모든 병목이 메모리 예산에서 비롯됨을 하나의 관점으로 종합하고, 메모리를 비우는 레버(모델 교체, num_ctx 하향, FLASH_ATTENTION+KV캐시 q8_0 양자화, keep_alive)와 메모리를 늘려 OOM을 유발하는 병렬화를 구분하며, 정확도 위험별로 분류한 인터랙티브 문서</h2>
+
+<h1>메모리 예산 관점 — 속도 최적화 종합</h1>
+<div class="sub">병렬화가 왜 안 되는가 + 그럼 무엇을 해야 하는가 — 하나의 그림으로</div>
+
+<div class="card" style="background:var(--bg-accent); border-color:var(--border-accent); margin-bottom:1.5rem;">
+  <b style="color:var(--text-accent);"><i class="ti ti-bulb" aria-hidden="true"></i> 하나의 원인, 하나의 규칙</b>
+  <p style="margin:.5rem 0 0; font-size:14px; color:var(--text-secondary);">지금 겪는 모든 것 — 배치당 343초, 스왑, 병렬화 실패 — 은 <b style="color:var(--text-primary);">24GB 메모리 예산 하나</b>로 설명됩니다. 30b는 혼자서도 예산을 꽉 채워 <b style="color:var(--text-primary);">스왑(느림)</b>이 걸립니다. 그래서 규칙은 단순합니다: <b style="color:var(--text-success);">메모리를 비우는 레버 = 해결</b>, <b style="color:var(--text-danger);">메모리를 늘리는 병렬화 = 악화(OOM)</b>.</p>
+</div>
+
+<h2 class="sec"><i class="ti ti-ruler-2" aria-hidden="true" style="color:var(--text-purple);"></i> 짚고 가기 — num_ctx 32768 → 16384</h2>
+<div class="lead">랩에 나오는 num_ctx 레버가 왜 무위험으로 속도를 주는지.</div>
+
+<div class="grid2" style="margin-bottom:.75rem;">
+  <div class="card">
+    <b><i class="ti ti-window" aria-hidden="true" style="color:var(--text-accent);"></i> num_ctx가 뭔가</b>
+    <div style="font-size:13px; color:var(--text-secondary); margin-top:6px;"><b style="color:var(--text-primary);">모델이 한 번에 다룰 수 있는 최대 토큰(글자 조각) 수</b> = 문맥 창의 크기. 32768 토큰이면 대략 A4 수십 장 분량입니다. 이 창을 채우려고 잡는 임시 메모리가 <b style="color:var(--text-primary);">KV 캐시</b>이고, 창이 클수록 KV도 커집니다.</div>
+  </div>
+  <div class="card">
+    <b><i class="ti ti-check" aria-hidden="true" style="color:var(--text-success);"></i> 왜 줄여도 안전한가</b>
+    <div style="font-size:13px; color:var(--text-secondary); margin-top:6px;">현재 코드는 배치마다 보고서를 <b style="color:var(--text-primary);">최대 12,000자(≈6천 토큰)까지만</b> 잘라 넣습니다. 32768은 실제 쓰는 양의 5배 넘는 <b style="color:var(--text-primary);">빈 방을 예약</b>해 둔 셈. 16384로 줄여도 6천 토큰 청크는 다 들어가므로 <b style="color:var(--text-primary);">모델이 보는 내용·출력 품질은 그대로</b>입니다.</div>
+  </div>
+</div>
+<div class="card" style="background:var(--bg-success); border-color:var(--border-success); margin-bottom:.5rem;">
+  <b style="color:var(--text-success);"><i class="ti ti-bolt" aria-hidden="true"></i> 왜 빨라지나</b>
+  <div style="font-size:13px; color:var(--text-secondary); margin-top:6px;">KV 캐시가 반으로 줄어 <b style="color:var(--text-primary);">되찾은 메모리로 스왑이 풀립니다.</b> 24GB에서 30b + 32768은 예산을 넘겨(랩에서 확인) 스왑 → 343초/배치의 원인. 16384로 낮추면 예산 안에 들어와 <b style="color:var(--text-primary);">정확도 손실 0으로 속도만</b> 얻습니다. 가중치(모델)를 건드리는 양자화·모델교체와 달리 <b style="color:var(--text-primary);">출력에 전혀 영향이 없어</b> 무위험으로 분류한 이유입니다. FLASH+q8와 함께 쓰면 KV가 한 번 더 줄어 효과가 겹칩니다.</div>
+</div>
+
+<h2 class="sec"><i class="ti ti-flask-2" aria-hidden="true" style="color:var(--text-accent);"></i> 메모리 예산 랩 — 레버를 바꿔 보세요</h2>
+<div class="lead">막대가 빨간 24GB 선을 넘으면 OOM/스왑. 수치는 이해용 근사값입니다.</div>
+
+<div class="card" style="margin-bottom:.75rem;">
+  <div class="grid3" style="margin-bottom:12px;">
+    <div><label class="f">모델</label>
+      <select id="mdl">
+        <option value="18|4.0|0" selected>qwen3:30b-a3b (현재)</option>
+        <option value="9|2.5|1">qwen3:14b</option>
+        <option value="5|2.0|1">qwen3:8b</option>
+      </select></div>
+    <div><label class="f">num_ctx</label>
+      <select id="ctx">
+        <option value="1.0" selected>32768 (현재)</option>
+        <option value="0.5">16384</option>
+        <option value="0.25">8192</option>
+      </select></div>
+    <div><label class="f">동시 처리(parallel)</label>
+      <select id="par">
+        <option value="1" selected>1 (직렬)</option>
+        <option value="2">2</option>
+        <option value="3">3</option>
+      </select></div>
+  </div>
+  <div id="flash" class="tgl" style="margin-bottom:14px;"><div class="dot"><i class="ti ti-check" aria-hidden="true"></i></div><div>FLASH_ATTENTION=1 + KV_CACHE_TYPE=q8_0 <span style="color:var(--text-muted);">(KV 캐시 ½)</span></div></div>
+
+  <div style="position:relative;">
+    <div style="position:relative; height:50px; background:var(--surface-0); border:1px solid var(--border-strong); border-radius:8px; overflow:hidden; display:flex;">
+      <div id="sOS"    class="seg" style="background:#888780;"></div>
+      <div id="sModel" class="seg" style="background:#534ab7;"></div>
+      <div id="sKV"    class="seg" style="background:#1d9e75;"></div>
+      <div id="sOver"  class="seg" style="background:repeating-linear-gradient(45deg,#a32d2d,#a32d2d 6px,#c14a4a 6px,#c14a4a 12px);"></div>
+    </div>
+    <div style="position:absolute; top:-6px; bottom:-6px; left:80%; width:2px; background:var(--text-danger);"></div>
+    <div style="position:absolute; top:-22px; left:calc(80% - 14px); font-size:11px; color:var(--text-danger); font-weight:500;">24GB</div>
+  </div>
+  <div style="display:flex; flex-wrap:wrap; gap:14px; margin-top:14px; align-items:center; justify-content:space-between;">
+    <div><span style="font-size:12px; color:var(--text-secondary);">필요 메모리 </span><b id="used" style="font-size:18px;"></b><span style="font-size:12px; color:var(--text-muted);"> / 24GB</span></div>
+    <div><span style="font-size:12px; color:var(--text-secondary);">처리량 </span><b id="tput" style="font-size:18px;"></b></div>
+    <div id="riskBadge"></div>
+  </div>
+  <div id="note" style="font-size:13px; margin-top:10px;"></div>
+</div>
+
+<h2 class="sec"><i class="ti ti-layout-columns" aria-hidden="true" style="color:var(--text-purple);"></i> 레버 종합 — 정확도 위험별 분류</h2>
+<div class="card" style="padding:0; overflow-x:auto;">
+<table style="width:100%; border-collapse:collapse;">
+<thead><tr><th>레버</th><th>메모리에 하는 일</th><th>효과</th><th>정확도 위험</th></tr></thead>
+<tbody>
+<tr><td><b>num_ctx 32768→16384</b></td><td>KV 캐시 ↓</td><td>스왑 완화, 속도↑</td><td><span class="chip" style="background:var(--bg-success); color:var(--text-success);">없음</span></td></tr>
+<tr><td><b>FLASH_ATTENTION + KV q8_0</b></td><td>KV 캐시 ≈½</td><td>메모리↓·속도↑, <b>모델 유지</b></td><td><span class="chip" style="background:var(--bg-success); color:var(--text-success);">거의 없음</span></td></tr>
+<tr><td><b>keep_alive 30m</b></td><td>재로딩 제거</td><td>파일 간 오버헤드↓</td><td><span class="chip" style="background:var(--bg-success); color:var(--text-success);">없음</span></td></tr>
+<tr><td><b>CLI 분리</b></td><td>영향 없음</td><td>세션 블로킹 제거</td><td><span class="chip" style="background:var(--bg-success); color:var(--text-success);">없음</span></td></tr>
+<tr><td><b>모델 교체 30b→14b/8b</b></td><td>가중치 18GB→9/5GB</td><td>🟢 <b>결정적</b> — 100% GPU 상주, 스왑 소멸, 5~10배</td><td><span class="chip" style="background:var(--bg-warning); color:var(--text-warning);">측정 필요</span></td></tr>
+<tr><td><b>배치 5→3</b></td><td>영향 작음</td><td>호출 수↓</td><td><span class="chip" style="background:var(--bg-warning); color:var(--text-warning);">측정 필요</span></td></tr>
+<tr><td><b>병렬화(parallel↑)</b></td><td>KV/모델 ×N <b>증가</b></td><td>이득 없음</td><td><span class="chip" style="background:var(--bg-danger); color:var(--text-danger);">역효과 · OOM</span></td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 class="sec"><i class="ti ti-route-2" aria-hidden="true" style="color:var(--text-success);"></i> 정확도 우선 권장 순서</h2>
+<div class="grid3">
+  <div class="card" style="border-left:3px solid var(--border-success); border-radius:0;">
+    <div class="chip" style="background:var(--bg-success); color:var(--text-success);">1 · 지금 (무위험)</div>
+    <div style="font-size:13px; color:var(--text-secondary); margin-top:8px;"><b style="color:var(--text-primary);">30b 유지</b> + num_ctx 16384 + <b style="color:var(--text-primary);">FLASH_ATTENTION + KV q8_0</b> + keep_alive. KV 캐시가 줄어 <b style="color:var(--text-primary);">스왑이 풀리고 정확도는 그대로.</b> 랩에서 30b+32768이 OOM이던 게 이 조합으로 예산 안에 들어옵니다.</div>
+  </div>
+  <div class="card" style="border-left:3px solid var(--border-warning); border-radius:0;">
+    <div class="chip" style="background:var(--bg-warning); color:var(--text-warning);">2 · 더 빨라야 하면 (측정)</div>
+    <div style="font-size:13px; color:var(--text-secondary); margin-top:8px;">골든셋으로 <b style="color:var(--text-primary);">14b → 8b</b> 정답율 비교. 통과 시 채택 — 완전 GPU 상주라 <b style="color:var(--text-primary);">5~10배</b>가 결정적. 배치 축소는 그 다음, 따로.</div>
+  </div>
+  <div class="card" style="border-left:3px solid var(--border-danger); border-radius:0;">
+    <div class="chip" style="background:var(--bg-danger); color:var(--text-danger);">✕ 하지 말 것</div>
+    <div style="font-size:13px; color:var(--text-secondary); margin-top:8px;"><b style="color:var(--text-primary);">병렬화.</b> 단일 24GB에선 메모리를 배로 요구해 OOM만 유발하고 처리량은 그대로. 진짜 병렬은 장비 증설이 전제.</div>
+  </div>
+</div>
+
+<h2 class="sec"><i class="ti ti-terminal" aria-hidden="true" style="color:var(--text-accent);"></i> 무위험 조합 적용 (환경변수 + 인자)</h2>
+<pre style="background:var(--surface-1); border:1px solid var(--border-success); border-radius:12px; padding:var(--pad-md); font-family:var(--font-mono); font-size:12.5px; line-height:1.7; margin:0; overflow-x:auto;"><span style="color:var(--text-muted);"># Ollama 서버 환경변수 — KV 캐시 절반, 모델은 30b 그대로</span>
+export OLLAMA_FLASH_ATTENTION=1
+export OLLAMA_KV_CACHE_TYPE=q8_0        <span style="color:var(--text-purple);"># q8_0=고품질, 거의 무손실 (q4는 더 공격적)</span>
+ollama serve
+
+<span style="color:var(--text-muted);"># 추출 호출 — num_ctx만 낮춰도 KV가 더 줄어듦</span>
+extract_from_pdf(raw, model, num_ctx=16384, keep_alive=<span style="color:var(--text-success);">"30m"</span>)</pre>
+
+<div class="card" style="margin-top:1.25rem; background:var(--bg-accent); border-color:var(--border-accent);">
+  <b style="color:var(--text-accent);"><i class="ti ti-flag" aria-hidden="true"></i> 종합 한 줄</b>
+  <div style="font-size:14px; color:var(--text-secondary); margin-top:6px;">속도 문제는 곧 <b style="color:var(--text-primary);">메모리 문제</b>입니다. <b style="color:var(--text-primary);">메모리를 비우면(KV 양자화·num_ctx·모델 축소) 빨라지고, 늘리면(병렬화) OOM</b>. 정확도 우선이면 먼저 무위험(FLASH+q8·num_ctx)으로 30b 스왑을 풀고, 부족하면 골든셋 검증 후 14b/8b로 내려가세요.</div>
+</div>
+
+</div>
+
+<script>
+(function(){
+  var DISP=30, BUDGET=24, OS=3;
+  var mdl=document.getElementById('mdl'), ctx=document.getElementById('ctx'),
+      par=document.getElementById('par'), flash=document.getElementById('flash');
+  var fon=true;
+  flash.addEventListener('click',function(){fon=!fon; flash.classList.toggle('on',fon); upd();});
+  [mdl,ctx,par].forEach(function(e){e.addEventListener('change',upd);});
+  function upd(){
+    var mp=mdl.value.split('|'), mem=+mp[0], kv32=+mp[1], mrisk=+mp[2];
+    var cf=+ctx.value, n=+par.value;
+    var kv = kv32*cf*(fon?0.5:1.0)*n;      // KV: ctx·flash·병렬 슬롯
+    var used = OS+mem+kv;
+    var pct=function(g){return Math.max(0,Math.min(g/DISP*100,100));};
+    document.getElementById('sOS').style.width=pct(OS)+'%';
+    document.getElementById('sOS').textContent=OS+'GB';
+    document.getElementById('sModel').style.width=pct(mem)+'%';
+    document.getElementById('sModel').textContent='모델 '+mem+'GB';
+    var kvShown=Math.min(kv, Math.max(0,BUDGET-OS-mem));
+    document.getElementById('sKV').style.width=pct(kvShown)+'%';
+    document.getElementById('sKV').textContent = kv>=1.2 ? ('KV '+kv.toFixed(1)) : '';
+    var over=Math.max(0,used-BUDGET);
+    document.getElementById('sOver').style.width=pct(over)+'%';
+
+    document.getElementById('used').textContent=used.toFixed(1)+'GB';
+    document.getElementById('used').style.color = used>BUDGET?'var(--text-danger)':'var(--text-primary)';
+    document.getElementById('tput').textContent = n>1?'≈ 1× (변화 없음)':'≈ 1×';
+
+    var badge=document.getElementById('riskBadge'), note=document.getElementById('note');
+    var oom = used>BUDGET, tight = !oom && used>BUDGET-1.5;
+    if(oom){
+      badge.innerHTML='<span class="chip" style="background:var(--bg-danger); color:var(--text-danger); font-size:13px; padding:4px 11px;"><i class="ti ti-alert-triangle"></i> OOM / 스왑</span>';
+      note.style.color='var(--text-danger)';
+      note.innerHTML='<i class="ti ti-alert-triangle"></i> 필요 '+used.toFixed(1)+'GB > 24GB. '+(n>1?'병렬이 KV를 ×'+n+'로 키워 초과 — 이득 없이 OOM.':'예산 초과로 스왑 → 느려짐. FLASH+q8나 num_ctx↓, 또는 더 작은 모델로 비우세요.');
+    } else {
+      var acc = mrisk? '<span class="chip" style="background:var(--bg-warning); color:var(--text-warning); font-size:13px; padding:4px 11px;"><i class="ti ti-flask"></i> 측정 필요</span>'
+                     : '<span class="chip" style="background:var(--bg-success); color:var(--text-success); font-size:13px; padding:4px 11px;"><i class="ti ti-shield-check"></i> 정확도 그대로</span>';
+      badge.innerHTML=acc;
+      note.style.color = tight?'var(--text-warning)':'var(--text-secondary)';
+      note.innerHTML = (tight?'<i class="ti ti-alert-circle" style="color:var(--text-warning);"></i> 겨우 들어감 — 여유 부족. ':'<i class="ti ti-check" style="color:var(--text-success);"></i> 예산 안에 여유 있게 들어감 → 완전 상주, 스왑 없음. ')
+        + (mrisk?'모델을 바꿨으니 골든셋으로 정답율 확인 후 채택.':'30b 유지 — 정확도 손실 없이 메모리만 확보.');
+    }
+  }
+  upd();
+})();
+</script>
+</body>
+</html>

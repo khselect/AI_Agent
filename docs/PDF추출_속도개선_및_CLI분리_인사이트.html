@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PDF 추출 속도 개선 + 배치 루프 CLI 분리</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.5.0/dist/tabler-icons.min.css">
+<style>
+:root{
+  --surface-2:#ffffff; --surface-1:#faf9f5; --surface-0:#f0eee6;
+  --text-primary:#1a1a18; --text-secondary:#57564f; --text-muted:#8a8980;
+  --text-accent:#185fa5; --text-danger:#a32d2d; --text-success:#0f6e56; --text-warning:#854f0b; --text-purple:#3c3489;
+  --bg-accent:#e6f1fb; --bg-danger:#fcebeb; --bg-success:#e1f5ee; --bg-warning:#faeeda; --bg-purple:#eeedfe;
+  --border:#e5e3da; --border-strong:#d3d1c7;
+  --border-accent:#378add; --border-danger:#e24b4a; --border-success:#1d9e75; --border-warning:#ba7517; --border-purple:#7f77dd;
+  --radius:8px; --pad-md:16px; --gap-sm:12px;
+  --font-sans:-apple-system,BlinkMacSystemFont,"Segoe UI","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --font-mono:"SF Mono",Menlo,Monaco,Consolas,"D2Coding",monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --surface-2:#26251f; --surface-1:#1f1e19; --surface-0:#161511;
+    --text-primary:#ecebe3; --text-secondary:#b4b2a9; --text-muted:#8a8980;
+    --text-accent:#85b7eb; --text-danger:#f09595; --text-success:#5dcaa5; --text-warning:#fac775; --text-purple:#afa9ec;
+    --bg-accent:#0c447c; --bg-danger:#501313; --bg-success:#085041; --bg-warning:#633806; --bg-purple:#3c3489;
+    --border:#3a3833; --border-strong:#4a4842;
+    --border-accent:#378add; --border-danger:#e24b4a; --border-success:#1d9e75; --border-warning:#ba7517; --border-purple:#7f77dd;
+  }
+}
+*{box-sizing:border-box;}
+body{margin:0; background:var(--surface-0); color:var(--text-primary); font-family:var(--font-sans); line-height:1.7; padding:2rem 1rem;}
+.wrap{max-width:860px; margin:0 auto;}
+h1{font-size:22px; font-weight:500; margin:0 0 .25rem;}
+h2.sec{font-size:18px; font-weight:500; margin:2.5rem 0 .75rem; padding-top:1.25rem; border-top:1px solid var(--border);}
+.sub{font-size:14px; color:var(--text-secondary); margin-bottom:1.25rem;}
+.lead{font-size:13px; color:var(--text-secondary); margin:-.25rem 0 1rem;}
+.sr-only{position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); border:0;}
+code{font-family:var(--font-mono); font-size:.92em;}
+pre{overflow-x:auto;}
+p{margin:0 0 1rem;}
+.card{background:var(--surface-1); border:1px solid var(--border); border-radius:12px; padding:var(--pad-md);}
+.grid2{display:grid; grid-template-columns:1fr 1fr; gap:var(--gap-sm);}
+.grid3{display:grid; grid-template-columns:1fr 1fr 1fr; gap:var(--gap-sm);}
+@media(max-width:640px){.grid2,.grid3{grid-template-columns:1fr;}}
+label.f{display:block; font-size:12px; color:var(--text-secondary); margin:0 0 4px;}
+select,input[type=range]{width:100%;}
+select{padding:8px; border-radius:var(--radius); border:1px solid var(--border-strong); background:var(--surface-2); color:var(--text-primary); font-family:var(--font-sans); font-size:13px;}
+.chip{display:inline-flex; align-items:center; gap:5px; font-size:12px; padding:3px 9px; border-radius:999px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h2 class="sr-only">qwen3:30b-a3b로 PDF 1건 추출에 1715.9초가 걸린 실측을 근거로, 파일당 처리시간을 줄이는 4가지 레버(모델 축소·배치 수 축소·num_ctx 하향·모델 상주)와 배치 루프를 별도 CLI로 분리해 상태 파일로 폴링하는 개선안을, 예상 시간 계산기와 개선 코드로 설명하는 인터랙티브 문서</h2>
+
+<h1>PDF 추출 속도 개선 + 배치 루프 CLI 분리</h1>
+<div class="sub">실측 반영 — qwen3:30b-a3b · 5배치 · num_ctx 32768 → 1파일 1715.9초(28.6분)</div>
+
+<div class="grid3" style="margin-bottom:1rem;">
+  <div class="card" style="background:var(--bg-danger); border-color:var(--border-danger);"><div style="font-size:12px; color:var(--text-danger);">현재 1파일</div><div style="font-size:22px; font-weight:500; color:var(--text-danger);">28.6분</div><div style="font-size:12px; color:var(--text-danger);">1715.9s · 5배치</div></div>
+  <div class="card"><div style="font-size:12px; color:var(--text-secondary);">배치당 평균</div><div style="font-size:22px; font-weight:500;">≈ 343초</div><div style="font-size:12px; color:var(--text-muted);">1715.9 ÷ 5</div></div>
+  <div class="card" style="background:var(--bg-danger); border-color:var(--border-danger);"><div style="font-size:12px; color:var(--text-danger);">50파일 환산</div><div style="font-size:22px; font-weight:500; color:var(--text-danger);">≈ 23.8시간</div><div style="font-size:12px; color:var(--text-danger);">현재 설정 그대로면</div></div>
+</div>
+
+<div class="card" style="background:var(--bg-accent); border-color:var(--border-accent); margin-bottom:1.5rem;">
+  <b style="color:var(--text-accent);"><i class="ti ti-bulb" aria-hidden="true"></i> 왜 343초/배치나 나오나</b>
+  <p style="margin:.5rem 0 0; font-size:14px; color:var(--text-secondary);">생성 토큰(짧은 JSON)만으로는 이 시간이 안 나옵니다. 주범은 <b style="color:var(--text-primary);">30B MoE 모델 + num_ctx 32768</b> 조합입니다. 32768 컨텍스트의 KV 캐시가 커서 통합메모리를 압박 → <b style="color:var(--text-primary);">스왑/대역폭 병목</b>이 걸리고, 배치마다 최대 12,000자 청크를 <b style="color:var(--text-primary);">프리필(prefill)</b> 하는 비용이 5번 반복됩니다. 그래서 레버는 ① 모델 축소 ② 배치 수 축소 ③ num_ctx 하향 ④ 모델 상주 순으로 효과가 큽니다.</p>
+</div>
+
+<h2 class="sec"><i class="ti ti-calculator" aria-hidden="true" style="color:var(--text-accent);"></i> 예상 시간 계산기 — 레버를 조합해 보세요</h2>
+<div class="lead">실측 배치당 343초를 기준으로 한 <b>대략적 계획 추정치</b>입니다(정밀 벤치마크 아님). 실제 값은 하드웨어·보고서 길이에 따라 달라집니다.</div>
+
+<div class="card" style="margin-bottom:.75rem;">
+  <div class="grid2" style="margin-bottom:12px;">
+    <div>
+      <label class="f">LLM 모델</label>
+      <select id="mdl">
+        <option value="1.0">qwen3:30b-a3b (현재)</option>
+        <option value="0.35">qwen3:8b</option>
+        <option value="0.30" selected>qwen2.5:7b-instruct</option>
+        <option value="0.15">qwen2.5:3b</option>
+      </select>
+    </div>
+    <div>
+      <label class="f">num_ctx (컨텍스트)</label>
+      <select id="ctx">
+        <option value="1.0">32768 (현재)</option>
+        <option value="0.85" selected>16384</option>
+        <option value="0.72">8192</option>
+      </select>
+    </div>
+  </div>
+  <label class="f">배치 수 <b id="lb" style="color:var(--text-primary);">3</b> <span style="color:var(--text-muted);">(현재 5)</span></label>
+  <input id="bt" type="range" min="1" max="5" step="1" value="3" style="accent-color:var(--text-accent);">
+  <label class="f" style="margin-top:12px;">파일 수 <b id="lf" style="color:var(--text-primary);">50</b></label>
+  <input id="fl" type="range" min="10" max="200" step="10" value="50" style="accent-color:var(--text-accent);">
+</div>
+
+<div class="grid3" style="margin-bottom:.5rem;">
+  <div class="card" style="text-align:center;"><div style="font-size:12px; color:var(--text-secondary);">파일당</div><div id="perFile" style="font-size:24px; font-weight:500; color:var(--text-success);">—</div></div>
+  <div class="card" style="text-align:center;"><div style="font-size:12px; color:var(--text-secondary);">전체(<span id="fl2">50</span>파일)</div><div id="total" style="font-size:24px; font-weight:500; color:var(--text-success);">—</div></div>
+  <div class="card" style="text-align:center;"><div style="font-size:12px; color:var(--text-secondary);">현재 대비</div><div id="speedup" style="font-size:24px; font-weight:500; color:var(--text-accent);">—</div></div>
+</div>
+<div id="reco" style="font-size:13px; margin-bottom:.5rem;"></div>
+
+<h2 class="sec"><i class="ti ti-adjustments" aria-hidden="true" style="color:var(--text-warning);"></i> 레버 4가지 — 효과와 트레이드오프</h2>
+<div class="grid2">
+  <div class="card" style="border-left:3px solid var(--border-danger); border-radius:0;"><b><i class="ti ti-cpu" aria-hidden="true" style="color:var(--text-danger);"></i> ① 모델 축소 (최대 레버)</b><div style="font-size:13px; color:var(--text-secondary); margin-top:6px;">필드 추출은 깊은 추론이 아니라 <b style="color:var(--text-primary);">구조화 작업</b>. 30b→7b로 3배 이상 빨라짐. 39/43 추출률이 유지되는지 골든셋으로 검증 후 확정.</div></div>
+  <div class="card" style="border-left:3px solid var(--border-warning); border-radius:0;"><b><i class="ti ti-layers-subtract" aria-hidden="true" style="color:var(--text-warning);"></i> ② 배치 5→3</b><div style="font-size:13px; color:var(--text-secondary); margin-top:6px;">프리필 반복 횟수가 곧 비용. 배치를 묶어 호출을 줄임. 너무 줄이면(1~2) 소형 모델의 JSON 정확도가 떨어지니 <b style="color:var(--text-primary);">3배치가 균형점</b>.</div></div>
+  <div class="card" style="border-left:3px solid var(--border-accent); border-radius:0;"><b><i class="ti ti-ruler-2" aria-hidden="true" style="color:var(--text-accent);"></i> ③ num_ctx 하향</b><div style="font-size:13px; color:var(--text-secondary); margin-top:6px;">배치 슬라이스가 최대 12,000자(≈6k토큰)이므로 <b style="color:var(--text-primary);">16384면 충분</b>. KV 캐시 축소로 메모리 압박·스왑 완화 — 30b에서 특히 효과.</div></div>
+  <div class="card" style="border-left:3px solid var(--border-success); border-radius:0;"><b><i class="ti ti-clock-play" aria-hidden="true" style="color:var(--text-success);"></i> ④ 모델 상주(keep_alive)</b><div style="font-size:13px; color:var(--text-secondary); margin-top:6px;">50파일 연속 처리 시 <b style="color:var(--text-primary);">파일마다 30b 재로딩</b>을 막음. <code>keep_alive="30m"</code>으로 한 번 로드해 계속 사용 → 파일 간 로딩 오버헤드 제거.</div></div>
+</div>
+
+<h2 class="sec"><i class="ti ti-file-diff" aria-hidden="true" style="color:var(--text-success);"></i> 개선 ① — extract_from_pdf 파라미터화</h2>
+<div class="lead">배치 수·num_ctx·keep_alive를 인자로 빼서 CLI 배치와 UI가 같은 함수를 다른 설정으로 쓰게.</div>
+
+<pre style="background:var(--surface-1); border:1px solid var(--border-success); border-radius:12px; padding:var(--pad-md); font-family:var(--font-mono); font-size:12.5px; line-height:1.6; margin:0 0 1rem; overflow-x:auto;"><span style="color:var(--text-muted);"># safety_analytics.py — 3배치 스키마 추가</span>
+BATCHES_3 = [COLUMNS[0:15], COLUMNS[15:30], COLUMNS[30:]]   <span style="color:var(--text-purple);"># 5배치 → 3배치</span>
+
+<span style="color:var(--text-accent);">def</span> extract_from_pdf(pdf_bytes, model_name, progress_fn=<span style="color:var(--text-accent);">None</span>,
+                     *, batches=BATCHES, num_ctx=<span style="color:var(--text-accent);">None</span>,
+                     num_predict=1024, keep_alive=<span style="color:var(--text-success);">"30m"</span>):     <span style="color:var(--text-purple);">④ 상주</span>
+    ...
+    report_text = pymupdf4llm.to_markdown(tmp_path)
+
+    <span style="color:var(--text-accent);">if</span> num_ctx <span style="color:var(--text-accent);">is None</span>:                                <span style="color:var(--text-purple);">③ 동적 컨텍스트</span>
+        need    = min(len(report_text), 12000)
+        num_ctx = 8192 <span style="color:var(--text-accent);">if</span> need <= 6000 <span style="color:var(--text-accent);">else</span> 16384
+
+    llm = ChatOllama(model=model_name, base_url=<span style="color:var(--text-success);">"http://127.0.0.1:11434"</span>,
+                     temperature=0, num_ctx=num_ctx,
+                     num_predict=num_predict, keep_alive=keep_alive)  <span style="color:var(--text-purple);"># 2048→1024</span>
+
+    <span style="color:var(--text-accent);">for</span> i, batch <span style="color:var(--text-accent);">in</span> enumerate(batches):                  <span style="color:var(--text-purple);">② 인자로 받은 배치 수</span>
+        ...</pre>
+
+<div class="card" style="background:var(--bg-warning); border-color:var(--border-warning); margin-bottom:.5rem;">
+  <b style="color:var(--text-warning);"><i class="ti ti-alert-circle" aria-hidden="true"></i> 3배치로 줄일 때 확인</b>
+  <div style="font-size:13px; color:var(--text-secondary); margin-top:6px;">배치가 커지면 한 호출의 필드 수(15개)가 늘어 JSON 파싱 실패 위험이 소폭 증가. 기존 <code>_safe_json</code> 6단계 fallback + 정규식 백업(<code>_regex_base</code>)이 이미 있으니 대체로 흡수되지만, 전환 후 <b style="color:var(--text-primary);">추출률(현재 39/43)을 골든셋으로 비교</b>하고 결정하세요. 배치 슬라이스(BATCH_SLICE)도 3구간에 맞게 재조정 필요.</div>
+</div>
+
+<h2 class="sec"><i class="ti ti-terminal-2" aria-hidden="true" style="color:var(--text-purple);"></i> 개선 ② — 배치 루프를 CLI로 분리 (batch_ingest.py)</h2>
+<div class="lead">8시간(현재 설정) 또는 3~4시간(개선 후) 작업을 웹 세션이 아닌 독립 프로세스에. 모델은 한 번만 로드.</div>
+
+<pre style="background:var(--surface-1); border:1px solid var(--border-purple); border-radius:12px; padding:var(--pad-md); font-family:var(--font-mono); font-size:12.5px; line-height:1.6; margin:0 0 1rem; overflow-x:auto;"><span style="color:var(--text-muted);"># batch_ingest.py — python batch_ingest.py ./reports --model qwen2.5:7b-instruct</span>
+<span style="color:var(--text-accent);">import</span> hashlib, os, sys, glob, json, time
+<span style="color:var(--text-accent);">from</span> safety_analytics <span style="color:var(--text-accent);">import</span> extract_from_pdf, BATCHES_3
+<span style="color:var(--text-accent);">from</span> safety_core <span style="color:var(--text-accent);">import</span> insert_accident
+
+folder, model = sys.argv[1], <span style="color:var(--text-success);">"qwen2.5:7b-instruct"</span>
+files = sorted(glob.glob(f<span style="color:var(--text-success);">"{folder}/*.pdf"</span>), key=<span style="color:var(--text-accent);">lambda</span> f: os.stat(f).st_mtime)
+done  = load_registry()                             <span style="color:var(--text-purple);"># 처리완료 해시셋 (재개용)</span>
+
+<span style="color:var(--text-accent);">for</span> i, f <span style="color:var(--text-accent);">in</span> enumerate(files):
+    raw = open(f,<span style="color:var(--text-success);">'rb'</span>).read()
+    h   = hashlib.sha256(raw).hexdigest()           <span style="color:var(--text-purple);"># 내용 해시 중복배제</span>
+    <span style="color:var(--text-accent);">if</span> h <span style="color:var(--text-accent);">in</span> done: <span style="color:var(--text-accent);">continue</span>
+
+    write_status(i, len(files), f, <span style="color:var(--text-success);">"running"</span>)      <span style="color:var(--text-purple);"># status.json ← UI가 폴링</span>
+    data,_ = extract_from_pdf(raw, model,
+                 batches=BATCHES_3, num_ctx=16384,   <span style="color:var(--text-purple);">①②③ 개선 설정</span>
+                 keep_alive=<span style="color:var(--text-success);">"30m"</span>)               <span style="color:var(--text-purple);">④ 모델 상주 → 파일마다 재로딩 X</span>
+    insert_accident(data, f, file_hash=h)           <span style="color:var(--text-purple);"># 파일단위 즉시 커밋</span>
+    record_registry(h, f)
+    write_status(i+1, len(files), f, <span style="color:var(--text-success);">"done"</span>)</pre>
+
+<h2 class="sec"><i class="ti ti-refresh" aria-hidden="true" style="color:var(--text-accent);"></i> 개선 ③ — UI는 상태만 폴링 (블로킹 제거)</h2>
+<pre style="background:var(--surface-1); border:1px solid var(--border); border-radius:12px; padding:var(--pad-md); font-family:var(--font-mono); font-size:12.5px; line-height:1.6; margin:0 0 1rem; overflow-x:auto;"><span style="color:var(--text-muted);"># tab_input.py — 폴더 배치 진행상황 (읽기 전용, 세션 안 묶임)</span>
+st.markdown(<span style="color:var(--text-success);">"### 폴더 배치 진행상황"</span>)
+<span style="color:var(--text-accent);">if</span> os.path.exists(STATUS_PATH):
+    s = json.load(open(STATUS_PATH))
+    st.progress(s[<span style="color:var(--text-success);">"i"</span>] / s[<span style="color:var(--text-success);">"total"</span>])
+    st.caption(f<span style="color:var(--text-success);">"{s['i']}/{s['total']} · 현재: {s['file']} · {s['state']}"</span>)
+    st.button(<span style="color:var(--text-success);">"새로고침"</span>)          <span style="color:var(--text-purple);"># 또는 st_autorefresh 5초</span>
+<span style="color:var(--text-muted);"># 실행은 터미널: python batch_ingest.py ./reports  (UI와 독립)</span></pre>
+
+<h2 class="sec"><i class="ti ti-checklist" aria-hidden="true" style="color:var(--text-success);"></i> 권장 설정 & 적용 순서</h2>
+<div class="card" style="background:var(--bg-success); border-color:var(--border-success); margin-bottom:.75rem;">
+  <b style="color:var(--text-success);"><i class="ti ti-star" aria-hidden="true"></i> 권장 조합</b>
+  <div style="font-size:14px; color:var(--text-secondary); margin-top:6px;"><b style="color:var(--text-primary);">qwen2.5:7b-instruct · 3배치 · num_ctx 16384 · keep_alive 30m</b> → 계산기 기준 파일당 약 4~5분, 50파일 3~4시간대. 정확도 우선이면 3b 대신 7b 유지, 속도 최우선이면 3b로 파일당 2분대까지.</div>
+</div>
+<div class="grid3">
+  <div class="card" style="border-left:3px solid var(--border-accent); border-radius:0;"><div class="chip" style="background:var(--bg-accent); color:var(--text-accent);">1순위 · 즉효</div><div style="font-size:13px; color:var(--text-secondary); margin-top:8px;">모델을 7b로 교체 + num_ctx 16384. 코드 두 줄, 골든셋으로 추출률만 확인.</div></div>
+  <div class="card" style="border-left:3px solid var(--border-warning); border-radius:0;"><div class="chip" style="background:var(--bg-warning); color:var(--text-warning);">2순위 · 구조</div><div style="font-size:13px; color:var(--text-secondary); margin-top:8px;">extract_from_pdf 파라미터화 + BATCHES_3 + 슬라이스 재조정. 추출률 재검증.</div></div>
+  <div class="card" style="border-left:3px solid var(--border-purple); border-radius:0;"><div class="chip" style="background:var(--bg-purple); color:var(--text-purple);">3순위 · 운영</div><div style="font-size:13px; color:var(--text-secondary); margin-top:8px;">batch_ingest.py + status.json 폴링 + 해시 중복배제·재개. 50파일 무인 처리.</div></div>
+</div>
+
+<div class="card" style="margin-top:1.5rem; background:var(--surface-2);">
+  <b><i class="ti ti-arrow-right" aria-hidden="true"></i> 다음 단계</b>
+  <div style="font-size:13px; color:var(--text-secondary); margin-top:6px;">원하시면 (1) <code>batch_ingest.py</code> + 레지스트리/status 유틸 전체 코드, (2) <code>extract_from_pdf</code> 파라미터화 + BATCHES_3 슬라이스 실제 패치, (3) 골든셋 추출률 비교 스크립트를 만들어 드립니다.</div>
+</div>
+
+</div>
+
+<script>
+(function(){
+  var BASE=343; // 실측 배치당 초 (1715.9/5), 30b·32768 기준
+  var mdl=document.getElementById('mdl'), ctx=document.getElementById('ctx'),
+      bt=document.getElementById('bt'), fl=document.getElementById('fl');
+  function fmt(sec){
+    if(sec<3600){var m=sec/60; return m.toFixed(1)+'분';}
+    return (sec/3600).toFixed(1)+'시간';
+  }
+  function upd(){
+    var mf=+mdl.value, cf=+ctx.value, b=+bt.value, n=+fl.value;
+    document.getElementById('lb').textContent=b;
+    document.getElementById('lf').textContent=n;
+    document.getElementById('fl2').textContent=n;
+    var per=BASE*b*mf*cf;              // 파일당 초
+    var tot=per*n;
+    var cur=BASE*5*1.0*1.0*n;          // 현재 설정(30b·5배치·32768)
+    document.getElementById('perFile').textContent=fmt(per);
+    document.getElementById('total').textContent=fmt(tot);
+    var x=cur/tot;
+    document.getElementById('speedup').textContent=x.toFixed(1)+'배';
+    var r=document.getElementById('reco');
+    if(per<=180){ r.style.color='var(--text-success)'; r.innerHTML='<i class="ti ti-check"></i> 파일당 '+fmt(per)+' — 목표(2~3분) 달성. 무인 배치로 충분.'; }
+    else if(per<=360){ r.style.color='var(--text-success)'; r.innerHTML='<i class="ti ti-check"></i> 파일당 '+fmt(per)+' — 실용적 수준. keep_alive로 파일 간 오버헤드까지 제거 권장.'; }
+    else if(per<=600){ r.style.color='var(--text-warning)'; r.innerHTML='<i class="ti ti-clock"></i> 파일당 '+fmt(per)+' — 개선 여지 있음. 모델을 더 줄이거나 배치를 3으로.'; }
+    else { r.style.color='var(--text-danger)'; r.innerHTML='<i class="ti ti-alert-triangle"></i> 파일당 '+fmt(per)+' — 여전히 무거움. 모델 축소가 최우선.'; }
+  }
+  [mdl,ctx,bt,fl].forEach(function(e){e.addEventListener('input',upd);});
+  upd();
+})();
+</script>
+</body>
+</html>

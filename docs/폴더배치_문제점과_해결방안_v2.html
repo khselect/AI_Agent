@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>폴더 지정 연속 분석 — 문제점과 해결방안</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.5.0/dist/tabler-icons.min.css">
+<style>
+:root{
+  --surface-2:#ffffff; --surface-1:#faf9f5; --surface-0:#f0eee6;
+  --text-primary:#1a1a18; --text-secondary:#57564f; --text-muted:#8a8980;
+  --text-accent:#185fa5; --text-danger:#a32d2d; --text-success:#0f6e56; --text-warning:#854f0b;
+  --bg-accent:#e6f1fb; --bg-danger:#fcebeb; --bg-success:#e1f5ee; --bg-warning:#faeeda;
+  --border:#e5e3da; --border-strong:#d3d1c7;
+  --border-accent:#378add; --border-danger:#e24b4a; --border-success:#1d9e75; --border-warning:#ba7517;
+  --radius:8px; --pad-md:16px; --gap-sm:12px;
+  --font-sans:-apple-system,BlinkMacSystemFont,"Segoe UI","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --font-mono:"SF Mono",Menlo,Monaco,Consolas,"D2Coding",monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --surface-2:#26251f; --surface-1:#1f1e19; --surface-0:#161511;
+    --text-primary:#ecebe3; --text-secondary:#b4b2a9; --text-muted:#8a8980;
+    --text-accent:#85b7eb; --text-danger:#f09595; --text-success:#5dcaa5; --text-warning:#fac775;
+    --bg-accent:#0c447c; --bg-danger:#501313; --bg-success:#085041; --bg-warning:#633806;
+    --border:#3a3833; --border-strong:#4a4842;
+    --border-accent:#378add; --border-danger:#e24b4a; --border-success:#1d9e75; --border-warning:#ba7517;
+  }
+}
+*{box-sizing:border-box;}
+body{margin:0; background:var(--surface-0); color:var(--text-primary);
+  font-family:var(--font-sans); line-height:1.7; padding:2rem 1rem;}
+.wrap{max-width:820px; margin:0 auto;}
+h1{font-size:22px; font-weight:500; margin:0 0 .25rem;}
+h2.sec{font-size:18px; font-weight:500; margin:2.5rem 0 .25rem; padding-top:1rem; border-top:1px solid var(--border);}
+.sub{font-size:14px; color:var(--text-secondary); margin-bottom:1.5rem;}
+.sr-only{position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); border:0;}
+code{font-family:var(--font-mono);}
+pre{overflow-x:auto;}
+p{margin:0 0 1rem;}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h2 class="sr-only">폴더 지정 연속 분석의 문제점(Streamlit 블로킹 8시간 부하)과 1번 권장방향 4가지, 2번 중복배제(SHA-256 해시), 그리고 SHA-256 해시가 무엇인지 설명하는 문서</h2>
+
+<h1>철도사고 위험도 평가 AI에이전트</h1>
+<div class="sub">폴더 지정 연속 데이터 분석 — 문제점과 해결방안 (1번 권장방향 중심)</div>
+
+<div style="padding:1rem 0; font-family:var(--font-sans); color:var(--text-primary); line-height:1.7;">
+
+<div style="display:flex; gap:var(--gap-sm); flex-wrap:wrap; margin-bottom:1.25rem;">
+  <div style="flex:1; min-width:150px; background:var(--surface-1); border:1px solid var(--border); border-radius:12px; padding:var(--pad-md);">
+    <div style="font-size:12px; color:var(--text-secondary);">처리 대상</div>
+    <div id="cf" style="font-size:22px; font-weight:500;">50</div>
+    <div style="font-size:12px; color:var(--text-muted);">PDF 파일</div>
+  </div>
+  <div style="flex:1; min-width:150px; background:var(--surface-1); border:1px solid var(--border); border-radius:12px; padding:var(--pad-md);">
+    <div style="font-size:12px; color:var(--text-secondary);">파일당 추론</div>
+    <div id="cm" style="font-size:22px; font-weight:500;">10분</div>
+    <div style="font-size:12px; color:var(--text-muted);">배치 5회 순차</div>
+  </div>
+  <div style="flex:1; min-width:150px; background:var(--bg-danger); border:1px solid var(--border-danger); border-radius:12px; padding:var(--pad-md);">
+    <div style="font-size:12px; color:var(--text-danger);">지속 풀로드</div>
+    <div id="ct" style="font-size:22px; font-weight:500; color:var(--text-danger);">≈ 8.3시간</div>
+    <div style="font-size:12px; color:var(--text-danger);">스파이크 아님</div>
+  </div>
+</div>
+
+<div style="background:var(--surface-1); border:1px solid var(--border); border-radius:12px; padding:var(--pad-md); margin-bottom:1.5rem;">
+  <div style="display:flex; justify-content:space-between; font-size:13px; color:var(--text-secondary); margin-bottom:6px;">
+    <span>파일 수 <b id="lf" style="color:var(--text-primary);">50</b></span>
+    <span>파일당 분 <b id="lm" style="color:var(--text-primary);">10</b></span>
+  </div>
+  <input id="sf" type="range" min="10" max="200" step="10" value="50" style="width:100%; accent-color:var(--text-accent);">
+  <input id="sm" type="range" min="2" max="10" step="1" value="10" style="width:100%; accent-color:var(--text-accent); margin-top:8px;">
+  <div id="verdict" style="margin-top:10px; font-size:13px; color:var(--text-danger);"></div>
+</div>
+
+<div style="font-size:16px; font-weight:500; margin-bottom:2px;"><i class="ti ti-alert-triangle" aria-hidden="true" style="color:var(--text-danger);"></i> 지금 구조 — Streamlit 메인 스레드에서 8시간 블로킹</div>
+<div style="font-size:13px; color:var(--text-secondary); margin-bottom:10px;">폴더 루프를 그대로 탭 안에 넣으면 아래 4곳에서 터집니다.</div>
+
+<pre style="background:var(--surface-1); border:1px solid var(--border-danger); border-radius:12px; padding:var(--pad-md); overflow-x:auto; font-family:var(--font-mono); font-size:13px; line-height:1.6; margin:0 0 1.5rem;"><span style="color:var(--text-muted);"># tab_input.py — 폴더 지정 (문제 있는 버전)</span>
+folder = st.text_input("보고서 폴더 경로")
+files  = glob.glob(f"{folder}/*.pdf")            <span style="background:var(--bg-danger); color:var(--text-danger); border-radius:4px; padding:0 5px;">①</span>
+<span style="color:var(--text-accent);">for</span> f <span style="color:var(--text-accent);">in</span> files:                                <span style="background:var(--bg-danger); color:var(--text-danger); border-radius:4px; padding:0 5px;">②</span>
+    data, _ = extract_from_pdf(open(f,'rb').read(), model)  <span style="color:var(--text-muted);"># 10분</span>
+    insert_accident(data, f)                     <span style="background:var(--bg-danger); color:var(--text-danger); border-radius:4px; padding:0 5px;">③</span>
+    st.progress(i/len(files))                     <span style="background:var(--bg-danger); color:var(--text-danger); border-radius:4px; padding:0 5px;">④</span></pre>
+
+<div style="display:grid; grid-template-columns:1fr 1fr; gap:var(--gap-sm); margin-bottom:2rem;">
+  <div style="background:var(--bg-danger); border-radius:0; border-left:3px solid var(--border-danger); padding:10px 12px;"><b style="color:var(--text-danger);">① 중복·순서 없음</b><br><span style="font-size:13px; color:var(--text-secondary);">glob 순서 임의, 같은 파일 재적재 무방비</span></div>
+  <div style="background:var(--bg-danger); border-radius:0; border-left:3px solid var(--border-danger); padding:10px 12px;"><b style="color:var(--text-danger);">② 세션 블로킹</b><br><span style="font-size:13px; color:var(--text-secondary);">8시간 동기 루프 → UI 정지, 탭 끊기면 전멸</span></div>
+  <div style="background:var(--bg-danger); border-radius:0; border-left:3px solid var(--border-danger); padding:10px 12px;"><b style="color:var(--text-danger);">③ 재개 불가</b><br><span style="font-size:13px; color:var(--text-secondary);">40번째서 죽으면 처음부터 다시</span></div>
+  <div style="background:var(--bg-danger); border-radius:0; border-left:3px solid var(--border-danger); padding:10px 12px;"><b style="color:var(--text-danger);">④ 진행상태 휘발</b><br><span style="font-size:13px; color:var(--text-secondary);">rerun/새로고침 시 카운터 소실</span></div>
+</div>
+
+<div style="font-size:16px; font-weight:500; margin-bottom:2px;"><i class="ti ti-checks" aria-hidden="true" style="color:var(--text-success);"></i> 권장 구조 — 별도 CLI + 체크포인트 (1번 권장방향 A~D)</div>
+<div style="font-size:13px; color:var(--text-secondary); margin-bottom:10px;">배치 루프를 Streamlit에서 떼어 <code>batch_ingest.py</code>로. UI는 상태만 폴링.</div>
+
+<pre style="background:var(--surface-1); border:1px solid var(--border-success); border-radius:12px; padding:var(--pad-md); overflow-x:auto; font-family:var(--font-mono); font-size:13px; line-height:1.6; margin:0 0 1rem;"><span style="color:var(--text-muted);"># batch_ingest.py — python batch_ingest.py ./reports</span>
+<span style="color:var(--text-accent);">import</span> hashlib, os, sys, glob, duckdb
+
+files = glob.glob(f"{sys.argv[1]}/*.pdf")
+files.sort(key=<span style="color:var(--text-accent);">lambda</span> f: os.stat(f).st_mtime)   <span style="background:var(--bg-accent); color:var(--text-accent); border-radius:4px; padding:0 5px;">A</span>
+
+done = load_registry()                            <span style="background:var(--bg-success); color:var(--text-success); border-radius:4px; padding:0 5px;">B</span>
+<span style="color:var(--text-accent);">for</span> i, f <span style="color:var(--text-accent);">in</span> enumerate(files):
+    raw  = open(f,'rb').read()
+    h    = hashlib.sha256(raw).hexdigest()        <span style="background:var(--bg-accent); color:var(--text-accent); border-radius:4px; padding:0 5px;">D2</span>
+    <span style="color:var(--text-accent);">if</span> h <span style="color:var(--text-accent);">in</span> done: <span style="color:var(--text-accent);">continue</span>              <span style="color:var(--text-muted);"># 이미 적재 → 스킵</span>
+
+    data, _ = extract_from_pdf(raw, model)        <span style="background:var(--bg-success); color:var(--text-success); border-radius:4px; padding:0 5px;">C1</span> <span style="color:var(--text-muted);"># 직렬 1건씩</span>
+    insert_accident(data, f, file_hash=h)         <span style="background:var(--bg-success); color:var(--text-success); border-radius:4px; padding:0 5px;">C2</span> <span style="color:var(--text-muted);"># 파일단위 커밋</span>
+    record_registry(h, f)                         <span style="background:var(--bg-success); color:var(--text-success); border-radius:4px; padding:0 5px;">B</span>
+    write_status(i+1, len(files), f)              <span style="color:var(--text-muted);"># status.json ← UI 폴링</span></pre>
+
+<div style="display:flex; flex-direction:column; gap:8px; margin-bottom:1.25rem;">
+  <div style="background:var(--bg-accent); border-radius:0; border-left:3px solid var(--border-accent); padding:10px 12px;"><b style="color:var(--text-accent);">A · 직렬 유지 + mtime 정렬</b><br><span style="font-size:13px; color:var(--text-secondary);">Ollama가 어차피 요청을 직렬 처리 — 병렬화하면 VRAM OOM만 유발. 순서는 <code>st_mtime</code>으로(결과엔 무영향).</span></div>
+  <div style="background:var(--bg-success); border-radius:0; border-left:3px solid var(--border-success); padding:10px 12px;"><b style="color:var(--text-success);">B · 적재 레지스트리 → 재개·멱등</b><br><span style="font-size:13px; color:var(--text-secondary);">처리 완료분을 기록. 재실행 시 새 파일만. 40번째서 죽어도 39건 보존 후 이어서.</span></div>
+  <div style="background:var(--bg-success); border-radius:0; border-left:3px solid var(--border-success); padding:10px 12px;"><b style="color:var(--text-success);">C · 파일단위 즉시 커밋 + 세션 분리</b><br><span style="font-size:13px; color:var(--text-secondary);">한 건 끝날 때마다 DuckDB 커밋. 8시간 작업을 웹 세션이 아닌 CLI 프로세스에 둠. Streamlit은 <code>status.json</code>만 폴링해 진행률 표시.</span></div>
+  <div style="background:var(--bg-warning); border-radius:0; border-left:3px solid var(--border-warning); padding:10px 12px;"><b style="color:var(--text-warning);">D · 파일당 시간 단축 (가장 효과 큼)</b><br><span style="font-size:13px; color:var(--text-secondary);">배치 5→3, 짧은 보고서는 num_ctx↓, 작은/양자화 모델·GPU. 10분→2~3분이면 50건을 1~2시간에.</span></div>
+</div>
+
+<div style="font-size:16px; font-weight:500; margin-bottom:2px;"><i class="ti ti-copy" aria-hidden="true" style="color:var(--text-accent);"></i> 2번 — 생성시간으로는 중복을 못 막습니다</div>
+<div style="font-size:13px; color:var(--text-secondary); margin-bottom:10px;">복붙하면 10개 파일의 생성시간이 전부 같아질 수 있어 판별 불가. 내용 해시가 정답.</div>
+
+<div style="display:flex; gap:var(--gap-sm); flex-wrap:wrap; margin-bottom:0.5rem;">
+  <div style="flex:1; min-width:240px; background:var(--bg-danger); border:1px solid var(--border-danger); border-radius:12px; padding:var(--pad-md);">
+    <div style="font-weight:500; color:var(--text-danger); margin-bottom:6px;">생성시간 기준 <i class="ti ti-x" aria-hidden="true"></i></div>
+    <div style="font-size:13px; color:var(--text-secondary);">복사/이동 시 타임스탬프 리셋·동일화. 파일명 달라도 같은 내용이면 못 걸러냄.</div>
+  </div>
+  <div style="flex:1; min-width:240px; background:var(--bg-success); border:1px solid var(--border-success); border-radius:12px; padding:var(--pad-md);">
+    <div style="font-weight:500; color:var(--text-success); margin-bottom:6px;">SHA-256 해시 기준 <i class="ti ti-check" aria-hidden="true"></i></div>
+    <div style="font-size:13px; color:var(--text-secondary);"><code>file_hash UNIQUE</code> 컬럼 + 레지스트리. 내용이 같으면 파일명·시간 무관하게 확실히 배제. 의미상 순서는 추출된 <code>발생일자</code>로.</div>
+  </div>
+</div>
+
+</div>
+
+<h2 class="sec"><i class="ti ti-fingerprint" aria-hidden="true" style="color:var(--text-accent);"></i> 부록 — SHA-256 해시란?</h2>
+<div class="sub">아무리 크고 긴 데이터든 고정된 길이의 "지문"으로 바꿔주는 함수입니다.</div>
+
+<p>파일 하나를 넣으면 항상 256비트, 즉 64자리 16진수 문자열 하나가 나옵니다. 내용이 조금만 달라져도 지문 전체가 완전히 바뀝니다.</p>
+
+<pre style="background:var(--surface-1); border:1px solid var(--border); border-radius:12px; padding:var(--pad-md); overflow-x:auto; font-family:var(--font-mono); font-size:13px; line-height:1.7; margin:0 0 1.25rem;"><span style="color:var(--text-muted);">"철도사고보고서.pdf"의 내용 전체</span>
+        │  SHA-256
+        ▼
+<span style="color:var(--text-success);">9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08</span>
+
+<span style="color:var(--text-muted)"># "2건 사망" → "3건 사망" 으로 한 글자만 고치면</span>
+        ▼
+<span style="color:var(--text-danger);">e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855</span>  <span style="color:var(--text-muted);"># 완전히 다른 값</span></pre>
+
+<div style="display:flex; flex-direction:column; gap:8px; margin-bottom:1.25rem;">
+  <div style="background:var(--bg-accent); border-radius:0; border-left:3px solid var(--border-accent); padding:10px 12px;"><b style="color:var(--text-accent);">결정적</b><br><span style="font-size:13px; color:var(--text-secondary);">같은 내용이면 항상 같은 값. 파일명·생성시간이 달라도 내용이 동일하면 지문이 똑같습니다.</span></div>
+  <div style="background:var(--bg-accent); border-radius:0; border-left:3px solid var(--border-accent); padding:10px 12px;"><b style="color:var(--text-accent);">눈사태 효과</b><br><span style="font-size:13px; color:var(--text-secondary);">단 1비트만 달라도 결과 전체가 뒤바뀝니다. 미세한 변경도 확실히 감지.</span></div>
+  <div style="background:var(--bg-accent); border-radius:0; border-left:3px solid var(--border-accent); padding:10px 12px;"><b style="color:var(--text-accent);">일방향</b><br><span style="font-size:13px; color:var(--text-secondary);">해시값에서 원본을 복원할 수 없습니다. 원래는 비밀번호 저장·위변조 검증용 보안 함수.</span></div>
+  <div style="background:var(--bg-accent); border-radius:0; border-left:3px solid var(--border-accent); padding:10px 12px;"><b style="color:var(--text-accent);">충돌 저항성</b><br><span style="font-size:13px; color:var(--text-secondary);">서로 다른 두 파일이 같은 해시일 확률은 사실상 0(2<sup>256</sup>). "해시가 같다 = 내용이 같다"고 안심하고 판단.</span></div>
+</div>
+
+<p>그래서 앞의 설계에서는 파일을 읽어 <code>hashlib.sha256(raw).hexdigest()</code>로 지문을 뽑고, 그 지문이 DB에 이미 있으면 "이미 처리한 파일"로 보고 건너뜁니다. 생성시간과 달리 복사·이름변경에 흔들리지 않는 이유가 이것입니다.</p>
+
+<div style="background:var(--bg-warning); border:1px solid var(--border-warning); border-radius:12px; padding:var(--pad-md); margin-bottom:1rem;">
+  <div style="font-weight:500; color:var(--text-warning); margin-bottom:6px;"><i class="ti ti-info-circle" aria-hidden="true"></i> 한 가지 구분할 점</div>
+  <div style="font-size:13px; color:var(--text-secondary);">이건 <b>바이트 단위로 완전히 동일한 파일</b>만 같다고 봅니다. 같은 사고를 다룬 다른 PDF(스캔본 vs 워드 출력본)는 내용이 비슷해도 바이트가 달라 해시가 다릅니다. 그런 "의미상 중복"까지 잡으려면 <code>발생일자+노선+이벤트소분류</code> 같은 소프트 키로 별도 검토하는 단계가 필요합니다.</div>
+</div>
+
+</div>
+
+<script>
+(function(){
+  var sf=document.getElementById('sf'), sm=document.getElementById('sm');
+  function upd(){
+    var n=+sf.value, m=+sm.value, hrs=(n*m/60);
+    document.getElementById('lf').textContent=n;
+    document.getElementById('lm').textContent=m;
+    document.getElementById('cf').textContent=n;
+    document.getElementById('cm').textContent=m+'분';
+    document.getElementById('ct').textContent='≈ '+hrs.toFixed(1)+'시간';
+    var v=document.getElementById('verdict');
+    if(hrs>=4){ v.style.color='var(--text-danger)'; v.innerHTML='<i class="ti ti-alert-triangle"></i> '+hrs.toFixed(1)+'시간 연속 풀로드 — 웹 세션에 묶으면 위험. CLI + 체크포인트 필수.'; }
+    else if(hrs>=1.5){ v.style.color='var(--text-warning)'; v.innerHTML='<i class="ti ti-clock"></i> '+hrs.toFixed(1)+'시간 — 재개 가능하게 설계 권장.'; }
+    else { v.style.color='var(--text-success)'; v.innerHTML='<i class="ti ti-check"></i> '+hrs.toFixed(1)+'시간 — 부담 낮음. 그래도 파일단위 커밋 권장.'; }
+  }
+  sf.addEventListener('input',upd); sm.addEventListener('input',upd); upd();
+})();
+</script>
+</body>
+</html>

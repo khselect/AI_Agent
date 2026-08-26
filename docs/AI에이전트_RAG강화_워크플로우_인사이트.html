@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI 에이전트 워크플로우 — 규정 벡터DB(RAG) 강화 인사이트</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.5.0/dist/tabler-icons.min.css">
+<style>
+:root{
+  --surface-2:#ffffff; --surface-1:#faf9f5; --surface-0:#f0eee6;
+  --text-primary:#1a1a18; --text-secondary:#57564f; --text-muted:#8a8980;
+  --text-accent:#185fa5; --text-danger:#a32d2d; --text-success:#0f6e56; --text-warning:#854f0b; --text-purple:#3c3489;
+  --bg-accent:#e6f1fb; --bg-danger:#fcebeb; --bg-success:#e1f5ee; --bg-warning:#faeeda; --bg-purple:#eeedfe;
+  --border:#e5e3da; --border-strong:#d3d1c7;
+  --border-accent:#378add; --border-danger:#e24b4a; --border-success:#1d9e75; --border-warning:#ba7517; --border-purple:#7f77dd;
+  --radius:8px; --pad-md:16px; --gap-sm:12px;
+  --font-sans:-apple-system,BlinkMacSystemFont,"Segoe UI","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --font-mono:"SF Mono",Menlo,Monaco,Consolas,"D2Coding",monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --surface-2:#26251f; --surface-1:#1f1e19; --surface-0:#161511;
+    --text-primary:#ecebe3; --text-secondary:#b4b2a9; --text-muted:#8a8980;
+    --text-accent:#85b7eb; --text-danger:#f09595; --text-success:#5dcaa5; --text-warning:#fac775; --text-purple:#afa9ec;
+    --bg-accent:#0c447c; --bg-danger:#501313; --bg-success:#085041; --bg-warning:#633806; --bg-purple:#3c3489;
+    --border:#3a3833; --border-strong:#4a4842;
+    --border-accent:#378add; --border-danger:#e24b4a; --border-success:#1d9e75; --border-warning:#ba7517; --border-purple:#7f77dd;
+  }
+}
+*{box-sizing:border-box;}
+body{margin:0; background:var(--surface-0); color:var(--text-primary);
+  font-family:var(--font-sans); line-height:1.7; padding:2rem 1rem;}
+.wrap{max-width:860px; margin:0 auto;}
+h1{font-size:22px; font-weight:500; margin:0 0 .25rem;}
+h2.sec{font-size:18px; font-weight:500; margin:2.5rem 0 .75rem; padding-top:1.25rem; border-top:1px solid var(--border);}
+.sub{font-size:14px; color:var(--text-secondary); margin-bottom:1.25rem;}
+.lead{font-size:13px; color:var(--text-secondary); margin:-.25rem 0 1rem;}
+.sr-only{position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); border:0;}
+code{font-family:var(--font-mono); font-size:.92em;}
+pre{overflow-x:auto;}
+p{margin:0 0 1rem;}
+.card{background:var(--surface-1); border:1px solid var(--border); border-radius:12px; padding:var(--pad-md);}
+.grid2{display:grid; grid-template-columns:1fr 1fr; gap:var(--gap-sm);}
+.grid3{display:grid; grid-template-columns:1fr 1fr 1fr; gap:var(--gap-sm);}
+@media(max-width:640px){.grid2,.grid3{grid-template-columns:1fr;}}
+.chip{display:inline-flex; align-items:center; gap:5px; font-size:12px; padding:3px 9px; border-radius:999px;}
+.stagebtn{flex:1; min-width:120px; text-align:left; background:var(--surface-2); border:1px solid var(--border-strong);
+  border-radius:10px; padding:10px 12px; cursor:pointer; font-family:var(--font-sans); color:var(--text-primary); font-size:13px;}
+.stagebtn.on{border-color:var(--border-accent); background:var(--bg-accent);}
+.stagebtn .n{font-size:11px; color:var(--text-muted);}
+.stagebtn.on .n{color:var(--text-accent);}
+.toggleWrap{display:inline-flex; align-items:center; gap:10px; font-size:13px;}
+.switch{position:relative; width:46px; height:26px; background:var(--border-strong); border-radius:999px; cursor:pointer; transition:.15s; flex:none;}
+.switch.on{background:var(--text-success);}
+.knob{position:absolute; top:3px; left:3px; width:20px; height:20px; background:#fff; border-radius:50%; transition:.15s;}
+.switch.on .knob{left:23px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h2 class="sr-only">철도안전 AI 에이전트 탭의 워크플로우(자료분석·레포트·시나리오·메일발송)를 기관 매뉴얼과 철도안전법을 벡터DB(RAG)로 미리 색인해 규정 근거 기반 전문 출력으로 강화하는 방안을, 단계별 before/after 인터랙티브 비교·아키텍처·검색 툴 코드·설계 리스크·로드맵으로 설명하는 인터랙티브 문서</h2>
+
+<h1>AI 에이전트 워크플로우 — 규정 벡터DB(RAG) 강화</h1>
+<div class="sub">자료분석 → 분석 레포트 → 시나리오 생성 → 레포트 메일 발송 · 기관 매뉴얼 + 철도안전법을 근거로</div>
+
+<div class="grid3" style="margin-bottom:1.25rem;">
+  <div class="card"><div style="font-size:12px; color:var(--text-secondary);">현재 에이전트 툴</div><div style="font-size:22px; font-weight:500;">7종</div><div style="font-size:12px; color:var(--text-muted);">extract · save · query · assess · scenario · web · notify</div></div>
+  <div class="card" style="background:var(--bg-success); border-color:var(--border-success);"><div style="font-size:12px; color:var(--text-success);">추가 제안 툴</div><div style="font-size:22px; font-weight:500; color:var(--text-success);">+1종</div><div style="font-size:12px; color:var(--text-success);">retrieve_regulation_tool</div></div>
+  <div class="card" style="background:var(--bg-purple); border-color:var(--border-purple);"><div style="font-size:12px; color:var(--text-purple);">벡터화 지식원</div><div style="font-size:22px; font-weight:500; color:var(--text-purple);">2종</div><div style="font-size:12px; color:var(--text-purple);">기관 매뉴얼 · 철도안전법</div></div>
+</div>
+
+<div class="card" style="background:var(--bg-accent); border-color:var(--border-accent); margin-bottom:1.5rem;">
+  <b style="color:var(--text-accent);"><i class="ti ti-bulb" aria-hidden="true"></i> 핵심 인사이트</b>
+  <p style="margin:.5rem 0 0; font-size:14px; color:var(--text-secondary);">현재 에이전트는 DB(사고 이력)는 잘 쓰지만 <b style="color:var(--text-primary);">"권위 있는 근거"</b>가 없습니다. 그래서 출력이 데이터 기반이긴 해도 <b style="color:var(--text-primary);">규정 근거는 비어 있습니다.</b> 매뉴얼·법령을 미리 벡터DB로 색인하고 검색 툴 하나를 추가하면, 같은 워크플로우가 <b style="color:var(--text-success);">"○○법 제△조 근거"를 인용하는 감사 대응 가능 수준</b>의 전문 출력으로 바뀝니다.</p>
+</div>
+
+<h2 class="sec"><i class="ti ti-arrows-left-right" aria-hidden="true" style="color:var(--text-accent);"></i> 단계별 비교 — 규정 근거(RAG)를 켜면</h2>
+<div class="lead">단계를 눌러 현행과 RAG 강화본을 비교하세요. 오른쪽 토글로 근거 인용을 켜고 끌 수 있습니다.</div>
+
+<div style="display:flex; justify-content:flex-end; margin-bottom:10px;">
+  <div class="toggleWrap"><span>규정 근거(RAG)</span><div id="ragSwitch" class="switch on" role="switch" aria-checked="true" tabindex="0"><div class="knob"></div></div><span id="ragLabel" style="color:var(--text-success); font-weight:500;">ON</span></div>
+</div>
+
+<div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px;">
+  <button class="stagebtn on" data-s="0"><div class="n">STEP 1</div>자료 분석</button>
+  <button class="stagebtn" data-s="1"><div class="n">STEP 2</div>분석 레포트</button>
+  <button class="stagebtn" data-s="2"><div class="n">STEP 3</div>시나리오 생성</button>
+  <button class="stagebtn" data-s="3"><div class="n">STEP 4</div>레포트 메일 발송</button>
+</div>
+
+<div class="card" style="margin-bottom:.75rem;">
+  <div style="font-size:12px; color:var(--text-secondary); margin-bottom:4px;">이 단계가 하는 일</div>
+  <div id="stageDesc" style="font-size:14px;"></div>
+</div>
+
+<div id="sampleBox" style="border-radius:12px; padding:var(--pad-md); font-size:13px; line-height:1.75; white-space:pre-wrap; border:1px solid;"></div>
+<div id="deltaBox" style="margin-top:.5rem; font-size:13px;"></div>
+
+<h2 class="sec"><i class="ti ti-topology-star-3" aria-hidden="true" style="color:var(--text-purple);"></i> 아키텍처 — 색인(오프라인) + 검색(런타임)</h2>
+<div class="lead">색인은 문서가 바뀔 때만 1회. 검색은 에이전트가 필요할 때 호출하는 8번째 툴.</div>
+
+<div class="grid2" style="margin-bottom:.75rem;">
+  <div class="card" style="background:var(--bg-purple); border-color:var(--border-purple);">
+    <b style="color:var(--text-purple);"><i class="ti ti-database-import" aria-hidden="true"></i> ① 색인 파이프라인 (오프라인·1회)</b>
+    <div style="font-size:13px; color:var(--text-secondary); margin-top:8px;">매뉴얼·법령 PDF/HWP → 파싱 → <b style="color:var(--text-primary);">조·항 단위 청킹</b> → 임베딩(bge-m3) → 벡터DB 적재. 청크마다 <b style="color:var(--text-primary);">메타데이터</b>(문서명·조번호·개정일·소관부서·버전) 부착.</div>
+  </div>
+  <div class="card" style="background:var(--bg-success); border-color:var(--border-success);">
+    <b style="color:var(--text-success);"><i class="ti ti-search" aria-hidden="true"></i> ② 검색 툴 (런타임·에이전트 호출)</b>
+    <div style="font-size:13px; color:var(--text-secondary); margin-top:8px;">질의를 임베딩 → 코사인 유사도 상위 k개 조항 반환(본문 + 출처 메타). 에이전트가 <code>query_db_tool</code>로 사고 데이터를, <code>retrieve_regulation_tool</code>로 규정 근거를 함께 확보.</div>
+  </div>
+</div>
+
+<pre style="background:var(--surface-1); border:1px solid var(--border); border-radius:12px; padding:var(--pad-md); font-family:var(--font-mono); font-size:12.5px; line-height:1.6; margin:0 0 .5rem; overflow-x:auto;">  [매뉴얼·철도안전법]     [사고 DuckDB]
+        │ 색인(1회)              │
+        ▼                        │
+  ┌───────────────┐              │
+  │  규정 벡터DB   │◀── retrieve_regulation_tool ──┐
+  │ (조·항 + 메타) │              │                 │
+  └───────────────┘              ▼                 │
+                          ┌──────────────────────────────┐
+                          │   LangGraph 에이전트 (8 tools) │
+                          │  query_db → retrieve_reg →     │
+                          │  assess_risk → scenario →      │
+                          │  report → notify               │
+                          └──────────────────────────────┘</pre>
+
+<h2 class="sec"><i class="ti ti-code" aria-hidden="true" style="color:var(--text-success);"></i> 검색 툴 — DuckDB VSS로 인프라 최소 추가</h2>
+<div class="lead">이미 DuckDB를 쓰므로 <code>vss</code> 확장만 붙이면 별도 벡터DB 서버가 필요 없습니다.</div>
+
+<pre style="background:var(--surface-1); border:1px solid var(--border-success); border-radius:12px; padding:var(--pad-md); font-family:var(--font-mono); font-size:12.5px; line-height:1.6; margin:0 0 1rem; overflow-x:auto;"><span style="color:var(--text-muted);"># railway_safety_agent.py — 8번째 툴</span>
+<span style="color:var(--text-accent);">@tool</span>
+<span style="color:var(--text-accent);">def</span> retrieve_regulation_tool(query: str, top_k: int = 5, doc_type: str = <span style="color:var(--text-success);">"all"</span>) -> str:
+    <span style="color:var(--text-muted);">"""철도안전법·기관 매뉴얼 벡터DB에서 질의와 관련된 조항을 검색."""</span>
+    emb  = ollama.embeddings(model=<span style="color:var(--text-success);">"bge-m3"</span>, prompt=query)[<span style="color:var(--text-success);">"embedding"</span>]  <span style="color:var(--text-purple);">① 로컬 임베딩</span>
+    conn = duckdb.connect(KB_PATH, read_only=<span style="color:var(--text-accent);">True</span>)
+    rows = conn.execute(<span style="color:var(--text-success);">"""
+        SELECT 문서명, 조항, 본문, 개정일, doc_type,
+               array_cosine_similarity(embedding, ?::FLOAT[1024]) AS score
+        FROM regulations
+        WHERE (? = 'all' OR doc_type = ?)
+        ORDER BY score DESC LIMIT ?"""</span>, [emb, doc_type, doc_type, top_k]).fetchall()  <span style="color:var(--text-purple);">② VSS 검색</span>
+    <span style="color:var(--text-accent);">return</span> json.dumps(  <span style="color:var(--text-purple);">③ 본문 + 출처 메타 반환 → 인용 강제</span>
+        [{<span style="color:var(--text-success);">"조항"</span>:r[1], <span style="color:var(--text-success);">"본문"</span>:r[2], <span style="color:var(--text-success);">"출처"</span>:f<span style="color:var(--text-success);">"{r[0]} ({r[3]} 개정)"</span>} <span style="color:var(--text-accent);">for</span> r <span style="color:var(--text-accent);">in</span> rows],
+        ensure_ascii=<span style="color:var(--text-accent);">False</span>)</pre>
+
+<div class="card" style="background:var(--bg-warning); border-color:var(--border-warning); margin-bottom:.5rem;">
+  <b style="color:var(--text-warning);"><i class="ti ti-shield-check" aria-hidden="true"></i> 인용 강제 프롬프트</b>
+  <div style="font-size:13px; color:var(--text-secondary); margin-top:6px;">시스템 프롬프트에 규칙 추가: <i>"규정 관련 판단은 반드시 retrieve_regulation_tool로 근거 조항을 확보한 뒤, 출처(문서명·조번호·개정일)를 명시하라. 검색 결과에 근거가 없으면 단정하지 말고 '해당 규정 확인 필요'로 표기하라."</i> → 환각·구버전 인용 방지.</div>
+</div>
+
+<h2 class="sec"><i class="ti ti-alert-triangle" aria-hidden="true" style="color:var(--text-danger);"></i> 설계 고려사항 · 리스크</h2>
+<div class="grid2">
+  <div class="card"><b><i class="ti ti-scissors" aria-hidden="true" style="color:var(--text-accent);"></i> 청킹 전략</b><div style="font-size:13px; color:var(--text-secondary); margin-top:6px;">법령은 <b style="color:var(--text-primary);">조·항·호 단위</b>, 매뉴얼은 절 단위로 분할. 한 청크에 여러 조가 섞이면 검색 정확도·인용 정합성이 무너짐.</div></div>
+  <div class="card"><b><i class="ti ti-language-katakana" aria-hidden="true" style="color:var(--text-accent);"></i> 한국어 임베딩</b><div style="font-size:13px; color:var(--text-secondary); margin-top:6px;"><code>bge-m3</code>(다국어·1024d) 또는 KURE·ko-sbert. 로컬 Ollama/sentence-transformers로 온프레 유지 — 기존 온프레 지향과 부합.</div></div>
+  <div class="card"><b><i class="ti ti-versions" aria-hidden="true" style="color:var(--text-danger);"></i> 최신성·버전 관리</b><div style="font-size:13px; color:var(--text-secondary); margin-top:6px;">법 개정 시 <b style="color:var(--text-primary);">해당 조항만 재색인</b>. 메타의 개정일을 출력에 노출해 구버전 인용을 즉시 식별.</div></div>
+  <div class="card"><b><i class="ti ti-lock" aria-hidden="true" style="color:var(--text-danger);"></i> 보안·접근권한</b><div style="font-size:13px; color:var(--text-secondary); margin-top:6px;">내부 매뉴얼은 <b style="color:var(--text-primary);">온프레 벡터DB</b>에만 적재, 외부 전송 금지. 발송 메일에 대외비 조항 원문 포함 여부를 등급별로 통제.</div></div>
+  <div class="card"><b><i class="ti ti-target" aria-hidden="true" style="color:var(--text-warning);"></i> 검색 품질 평가</b><div style="font-size:13px; color:var(--text-secondary); margin-top:6px;">"이 사고 유형 → 정답 조항" 소규모 <b style="color:var(--text-primary);">골든셋</b>으로 top-k 정확도 측정. hybrid(키워드+벡터)로 조번호 정확 매칭 보완.</div></div>
+  <div class="card"><b><i class="ti ti-scale" aria-hidden="true" style="color:var(--text-warning);"></i> 법적 책임 경계</b><div style="font-size:13px; color:var(--text-secondary); margin-top:6px;">출력은 <b style="color:var(--text-primary);">근거 제시·의사결정 보조</b>까지. "법 위반 확정" 같은 단정은 배제하고 담당자 검토 전제 문구를 표준화.</div></div>
+</div>
+
+<h2 class="sec"><i class="ti ti-map-2" aria-hidden="true" style="color:var(--text-success);"></i> 단계적 로드맵</h2>
+<div class="grid3">
+  <div class="card" style="border-left:3px solid var(--border-accent); border-radius:0;"><div class="chip" style="background:var(--bg-accent); color:var(--text-accent);">Phase 1 · 파일럿</div><div style="font-size:13px; color:var(--text-secondary); margin-top:8px;">철도안전법 1종만 색인. DuckDB VSS + bge-m3. <code>retrieve_regulation_tool</code> 등록, 골든셋으로 검색 정확도 확인.</div></div>
+  <div class="card" style="border-left:3px solid var(--border-purple); border-radius:0;"><div class="chip" style="background:var(--bg-purple); color:var(--text-purple);">Phase 2 · 확장</div><div style="font-size:13px; color:var(--text-secondary); margin-top:8px;">기관 매뉴얼·시행규칙·내규 추가. 워크플로우 goal_template에 "근거 조항 인용" 지시 삽입, 레포트에 출처 각주.</div></div>
+  <div class="card" style="border-left:3px solid var(--border-success); border-radius:0;"><div class="chip" style="background:var(--bg-success); color:var(--text-success);">Phase 3 · 운영</div><div style="font-size:13px; color:var(--text-secondary); margin-top:8px;">개정 자동 재색인, 규정 대비 gap 분석, 감사 로그(어떤 조항이 어떤 판단에 쓰였는지) 보관.</div></div>
+</div>
+
+<div class="card" style="margin-top:1.5rem; background:var(--surface-2);">
+  <b><i class="ti ti-arrow-right" aria-hidden="true"></i> 다음 단계</b>
+  <div style="font-size:13px; color:var(--text-secondary); margin-top:6px;">원하시면 이 설계를 (1) 실제 색인 스크립트 <code>build_kb.py</code> + <code>retrieve_regulation_tool</code> 코드, (2) 기술 사양 <code>.md</code>, (3) 내부 보고용 <code>.docx</code> 중 필요한 형식으로 만들어 드립니다.</div>
+</div>
+
+</div>
+
+<script>
+(function(){
+  var data=[
+    {desc:"에이전트가 DB에서 사고 이력을 조회해 유형·원인·추세를 분석하는 단계.",
+     before:"[STEP 1 · 현행]\n경부선 최근 3년 탈선 사고 4건 조회.\n· 원인: 궤도틀림 2, 차량결함 1, 기상 1\n· 최다 유형: 궤도 관련\n→ DB 통계만 요약. 어떤 규정·점검 기준이 적용되는지는 알 수 없음.",
+     after:"[STEP 1 · RAG]\n경부선 최근 3년 탈선 사고 4건 조회 + 관련 규정 검색.\n· 원인: 궤도틀림 2, 차량결함 1, 기상 1\n· 적용 근거: 철도안전법 제38조(종합시험운행), 시행규칙 궤도 점검주기 기준\n  출처: 철도안전법(2025-03 개정) · 궤도유지관리매뉴얼 §4.2\n→ 데이터 + 어떤 기준으로 판단해야 하는지까지 확보.",
+     delta:"규정 검색이 붙어 '통계'가 '기준 대비 진단'의 출발점이 됩니다."},
+    {desc:"분석 결과를 근거와 함께 보고서로 작성하는 단계.",
+     before:"[STEP 2 · 현행]\n요약: 궤도틀림이 주요 원인. 점검 강화 권고.\n→ 권고의 근거가 일반론이라 설득력·감사 대응이 약함.",
+     after:"[STEP 2 · RAG]\n요약: 4건 중 2건이 궤도틀림. 궤도유지관리매뉴얼 §4.2의 점검주기(분기 1회) 대비\n최근 점검 이력이 기준 미달인 구간 식별.\n인용: 철도안전법 제38조 / 매뉴얼 §4.2(2025-03).\n권고: 해당 구간 점검주기 상향.\n→ 조항 인용 + 규정 대비 gap → 감사·이해관계자 대응 가능.",
+     delta:"보고서에 출처 각주와 '규정 대비 미준수 항목'이 생깁니다."},
+    {desc:"Bow-Tie 시나리오의 예방·완화 장벽을 세우는 단계.",
+     before:"[STEP 3 · 현행]\n위협: 궤도틀림 → 정상: 정상운행 → 결과: 탈선\n예방장벽: 정기점검, 서행\n→ 장벽이 일반적 문구. 어떤 절차를 근거로 하는지 불명확.",
+     after:"[STEP 3 · RAG]\n예방장벽 ↔ 규정 매핑:\n· 정기 궤도검측 — 매뉴얼 §4.2 점검주기\n· 속도제한 발령 — 운전취급규정 제○조\n· 우천 시 서행 — 기상대응지침 §2\n각 장벽에 근거 조항·담당부서 태깅.\n→ 시나리오가 실제 기관 절차와 연결됨.",
+     delta:"각 방어장벽이 실제 매뉴얼 조치기준과 1:1로 매핑됩니다."},
+    {desc:"수신자 역할별 맞춤 보고서를 작성해 발송하는 단계.",
+     before:"[STEP 4 · 현행]\n안전팀장에게 요약 3줄 발송.\n→ 모든 수신자에게 같은 톤. 근거 링크 없음.",
+     after:"[STEP 4 · RAG]\n· 안전팀장: 규정 대비 gap + 인용 조항 요약\n· 시설부서: 해당 구간·매뉴얼 §4.2 점검 액션아이템\n· 경영진: 리스크 등급 + 법적 근거 한 줄\n(대외비 조항 원문은 등급 규칙에 따라 첨부 통제)\n→ 역할별로 필요한 근거만, 보안 등급 지켜 발송.",
+     delta:"수신자 역할에 맞는 근거를 담고, 대외비는 등급별로 통제합니다."}
+  ];
+  var cur=0, rag=true;
+  var btns=document.querySelectorAll('.stagebtn');
+  var sw=document.getElementById('ragSwitch'), lbl=document.getElementById('ragLabel');
+  var sample=document.getElementById('sampleBox'), delta=document.getElementById('deltaBox'), sdesc=document.getElementById('stageDesc');
+
+  function render(){
+    var d=data[cur];
+    sdesc.textContent=d.desc;
+    if(rag){
+      sample.textContent=d.after;
+      sample.style.background='var(--bg-success)'; sample.style.borderColor='var(--border-success)';
+      delta.innerHTML='<i class="ti ti-plus"></i> <b style="color:var(--text-success);">달라지는 점 — </b><span style="color:var(--text-secondary);">'+d.delta+'</span>';
+    }else{
+      sample.textContent=d.before;
+      sample.style.background='var(--surface-1)'; sample.style.borderColor='var(--border)';
+      delta.innerHTML='<i class="ti ti-info-circle"></i> <span style="color:var(--text-muted);">근거 인용을 켜면 이 단계가 규정 기반으로 강화됩니다.</span>';
+    }
+  }
+  btns.forEach(function(b){b.addEventListener('click',function(){
+    cur=+b.dataset.s;
+    btns.forEach(function(x){x.classList.remove('on');}); b.classList.add('on');
+    render();
+  });});
+  function toggle(){
+    rag=!rag;
+    sw.classList.toggle('on',rag); sw.setAttribute('aria-checked',rag);
+    lbl.textContent=rag?'ON':'OFF'; lbl.style.color=rag?'var(--text-success)':'var(--text-muted)';
+    render();
+  }
+  sw.addEventListener('click',toggle);
+  sw.addEventListener('keydown',function(e){if(e.key===' '||e.key==='Enter'){e.preventDefault();toggle();}});
+  render();
+})();
+</script>
+</body>
+</html>

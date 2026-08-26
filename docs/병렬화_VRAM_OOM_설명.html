@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>병렬화하면 왜 VRAM OOM만 유발되나</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.5.0/dist/tabler-icons.min.css">
+<style>
+:root{
+  --surface-2:#ffffff; --surface-1:#faf9f5; --surface-0:#f0eee6;
+  --text-primary:#1a1a18; --text-secondary:#57564f; --text-muted:#8a8980;
+  --text-accent:#185fa5; --text-danger:#a32d2d; --text-success:#0f6e56; --text-warning:#854f0b; --text-purple:#3c3489;
+  --bg-accent:#e6f1fb; --bg-danger:#fcebeb; --bg-success:#e1f5ee; --bg-warning:#faeeda; --bg-purple:#eeedfe;
+  --border:#e5e3da; --border-strong:#d3d1c7;
+  --border-accent:#378add; --border-danger:#e24b4a; --border-success:#1d9e75; --border-warning:#ba7517; --border-purple:#7f77dd;
+  --radius:8px; --pad-md:16px; --gap-sm:12px;
+  --font-sans:-apple-system,BlinkMacSystemFont,"Segoe UI","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --font-mono:"SF Mono",Menlo,Monaco,Consolas,"D2Coding",monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --surface-2:#26251f; --surface-1:#1f1e19; --surface-0:#161511;
+    --text-primary:#ecebe3; --text-secondary:#b4b2a9; --text-muted:#8a8980;
+    --text-accent:#85b7eb; --text-danger:#f09595; --text-success:#5dcaa5; --text-warning:#fac775; --text-purple:#afa9ec;
+    --bg-accent:#0c447c; --bg-danger:#501313; --bg-success:#085041; --bg-warning:#633806; --bg-purple:#3c3489;
+    --border:#3a3833; --border-strong:#4a4842;
+    --border-accent:#378add; --border-danger:#e24b4a; --border-success:#1d9e75; --border-warning:#ba7517; --border-purple:#7f77dd;
+  }
+}
+*{box-sizing:border-box;}
+body{margin:0; background:var(--surface-0); color:var(--text-primary); font-family:var(--font-sans); line-height:1.7; padding:2rem 1rem;}
+.wrap{max-width:820px; margin:0 auto;}
+h1{font-size:22px; font-weight:500; margin:0 0 .25rem;}
+h2.sec{font-size:18px; font-weight:500; margin:2.25rem 0 .75rem; padding-top:1.25rem; border-top:1px solid var(--border);}
+.sub{font-size:14px; color:var(--text-secondary); margin-bottom:1.25rem;}
+.lead{font-size:13px; color:var(--text-secondary); margin:-.25rem 0 1rem;}
+.sr-only{position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); border:0;}
+code{font-family:var(--font-mono); font-size:.92em;}
+p{margin:0 0 1rem;}
+.card{background:var(--surface-1); border:1px solid var(--border); border-radius:12px; padding:var(--pad-md);}
+.grid3{display:grid; grid-template-columns:1fr 1fr 1fr; gap:var(--gap-sm);}
+@media(max-width:640px){.grid3{grid-template-columns:1fr;}}
+.seg{display:flex; align-items:center; justify-content:center; font-size:11.5px; color:#fff; font-weight:500; height:100%; overflow:hidden; white-space:nowrap;}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h2 class="sr-only">24GB 통합 메모리를 쓰는 맥에서 PDF 추출을 병렬화하면, 모델 가중치와 KV 캐시가 메모리 예산을 초과해 VRAM OOM(메모리 부족)이 나고 속도 이득도 없이 직렬화되거나 크래시되는 이유를, 동시 처리 수 슬라이더가 달린 메모리 미터로 보여주는 인터랙티브 문서</h2>
+
+<h1>병렬화하면 왜 VRAM OOM만 유발되나</h1>
+<div class="sub">단일 24GB 맥에서 PDF 추출을 "동시에" 돌리면 생기는 일</div>
+
+<div class="card" style="background:var(--bg-accent); border-color:var(--border-accent); margin-bottom:1.5rem;">
+  <b style="color:var(--text-accent);"><i class="ti ti-bulb" aria-hidden="true"></i> 한 줄 요약</b>
+  <p style="margin:.5rem 0 0; font-size:14px; color:var(--text-secondary);">GPU는 하나, 메모리 예산도 정해져(24GB) 있는데, 병렬화는 <b style="color:var(--text-primary);">작업마다 메모리를 따로 요구</b>합니다. 30b 모델은 혼자서도 메모리를 거의 다 쓰기 때문에, 2개만 동시에 돌려도 예산을 넘겨 <b style="color:var(--text-danger);">OOM(Out Of Memory)</b>이 나거나 스왑으로 오히려 더 느려집니다. 속도 이득은 없습니다.</p>
+</div>
+
+<h2 class="sec"><i class="ti ti-gauge" aria-hidden="true" style="color:var(--text-accent);"></i> 메모리 미터 — 동시 처리 수를 올려보세요</h2>
+<div class="lead">막대가 24GB 선을 넘으면 OOM입니다. 수치는 이해를 돕기 위한 근사값입니다.</div>
+
+<div class="card" style="margin-bottom:.75rem;">
+  <div style="display:flex; justify-content:space-between; font-size:13px; margin-bottom:6px;">
+    <span>동시 처리 수(parallel) <b id="lp" style="color:var(--text-primary);">1</b></span>
+    <span id="fitTag" style="font-weight:500;"></span>
+  </div>
+  <input id="par" type="range" min="1" max="4" step="1" value="1" style="width:100%; accent-color:var(--text-accent);">
+
+  <div style="position:relative; margin-top:16px;">
+    <div style="position:relative; height:52px; background:var(--surface-0); border:1px solid var(--border-strong); border-radius:8px; overflow:hidden; display:flex;">
+      <div id="segOS"    class="seg" style="background:#888780; width:12.5%;">OS 3GB</div>
+      <div id="segModel" class="seg" style="background:#534ab7; width:75%;">모델 18GB</div>
+      <div id="segKV"    class="seg" style="background:#1d9e75; width:10.4%;">KV</div>
+    </div>
+    <div style="position:absolute; top:-6px; bottom:-6px; left:100%; width:2px; background:var(--text-danger);"></div>
+    <div style="position:absolute; top:-22px; left:calc(100% - 30px); font-size:11px; color:var(--text-danger); font-weight:500;">24GB</div>
+    <div id="overflowWrap" style="height:14px; margin-top:6px; display:none;">
+      <div id="overflow" style="height:100%; background:repeating-linear-gradient(45deg,var(--text-danger),var(--text-danger) 6px,transparent 6px,transparent 12px); border-radius:4px;"></div>
+    </div>
+  </div>
+  <div id="memNote" style="font-size:13px; margin-top:12px;"></div>
+</div>
+
+<div class="grid3" style="margin-bottom:.5rem;">
+  <div class="card" style="text-align:center;"><div style="font-size:12px; color:var(--text-secondary);">필요 메모리</div><div id="used" style="font-size:22px; font-weight:500;">—</div><div style="font-size:11px; color:var(--text-muted);">예산 24GB</div></div>
+  <div class="card" style="text-align:center;"><div style="font-size:12px; color:var(--text-secondary);">실제 처리량</div><div id="tput" style="font-size:22px; font-weight:500;">—</div><div style="font-size:11px; color:var(--text-muted);">GPU 1개 공유</div></div>
+  <div class="card" style="text-align:center;"><div style="font-size:12px; color:var(--text-secondary);">결과</div><div id="verdict" style="font-size:22px; font-weight:500;">—</div></div>
+</div>
+
+<h2 class="sec"><i class="ti ti-list-details" aria-hidden="true" style="color:var(--text-purple);"></i> 왜 이렇게 되나 — 3가지 이유</h2>
+<div class="grid3">
+  <div class="card" style="border-left:3px solid var(--border-danger); border-radius:0;"><b><i class="ti ti-stack-2" aria-hidden="true" style="color:var(--text-danger);"></i> ① 메모리가 곱으로 늘어남</b><div style="font-size:13px; color:var(--text-secondary); margin-top:6px;">한 인스턴스에서 병렬 슬롯을 늘리면 <b style="color:var(--text-primary);">슬롯마다 KV 캐시</b>가 따로 필요. 별도 인스턴스로 띄우면 <b style="color:var(--text-primary);">모델 18GB가 통째로 복제</b>됩니다. 24GB엔 2벌이 안 들어갑니다.</div></div>
+  <div class="card" style="border-left:3px solid var(--border-warning); border-radius:0;"><b><i class="ti ti-cpu" aria-hidden="true" style="color:var(--text-warning);"></i> ② 연산 자원도 하나</b><div style="font-size:13px; color:var(--text-secondary); margin-top:6px;">GPU(맥은 통합칩)는 1개. 설령 메모리가 버텨도 두 작업이 <b style="color:var(--text-primary);">같은 코어를 나눠 쓰며 시분할</b>돼, 각각 절반 속도 → 총 처리량은 그대로.</div></div>
+  <div class="card" style="border-left:3px solid var(--border-success); border-radius:0;"><b><i class="ti ti-arrows-sort" aria-hidden="true" style="color:var(--text-success);"></i> ③ Ollama는 기본 직렬</b><div style="font-size:13px; color:var(--text-secondary); margin-top:6px;">그래서 Ollama는 기본적으로 요청을 <b style="color:var(--text-primary);">큐에 넣어 하나씩</b> 처리합니다. 억지로 <code>OLLAMA_NUM_PARALLEL</code>을 키우면 이득 없이 OOM 위험만 커집니다.</div></div>
+</div>
+
+<h2 class="sec"><i class="ti ti-info-circle" aria-hidden="true" style="color:var(--text-accent);"></i> 용어</h2>
+<div class="card" style="font-size:13px; color:var(--text-secondary);">
+  <b style="color:var(--text-primary);">VRAM</b> = GPU가 쓰는 메모리(Video RAM). PC는 그래픽카드에 따로 있지만, <b style="color:var(--text-primary);">맥은 CPU·GPU가 하나의 통합 메모리(24GB)를 공유</b>합니다 — 용어만 VRAM이지 여기선 그 24GB 전체가 예산입니다.<br>
+  <b style="color:var(--text-primary);">OOM</b> = Out Of Memory. 필요한 메모리가 예산을 넘으면 로딩 실패로 프로세스가 죽거나, 디스크로 밀어내는 <b style="color:var(--text-primary);">스왑</b>이 걸려 수십 배 느려집니다.<br>
+  <b style="color:var(--text-primary);">KV 캐시</b> = 모델이 문맥을 기억하려고 잡는 임시 메모리. num_ctx(문맥 창)가 클수록, 병렬 슬롯이 많을수록 커집니다.
+</div>
+
+<div class="card" style="margin-top:1.5rem; background:var(--bg-success); border-color:var(--border-success);">
+  <b style="color:var(--text-success);"><i class="ti ti-flag" aria-hidden="true"></i> 그래서 결론</b>
+  <div style="font-size:14px; color:var(--text-secondary); margin-top:6px;">단일 24GB 머신에서는 <b style="color:var(--text-primary);">직렬이 정답</b>입니다. 여러 파일을 빨리 처리하고 싶으면 병렬이 아니라 <b style="color:var(--text-primary);">파일당 시간을 줄이는 것</b>(작은 모델·num_ctx 하향·keep_alive)이 유일하게 실효 있는 방향입니다. 진짜 병렬이 필요하면 GPU/메모리를 늘린 별도 장비가 있어야 합니다.</div>
+</div>
+
+</div>
+
+<script>
+(function(){
+  var BUDGET=24, OS=3, MODEL=18, KV=2.5; // GB, 근사값
+  var par=document.getElementById('par');
+  function upd(){
+    var n=+par.value;
+    var used=OS+MODEL+KV*n;                 // 모델은 인스턴스 공유 가정(가장 유리한 경우)
+    document.getElementById('lp').textContent=n;
+    document.getElementById('used').textContent=used.toFixed(1)+'GB';
+    document.getElementById('tput').textContent='≈ 1×';
+    var over = used>BUDGET;
+    var kvW = KV*n/BUDGET*100;
+    document.getElementById('segKV').style.width=Math.min(kvW, 100-12.5-75)+'%';
+    document.getElementById('segKV').textContent = n>1 ? 'KV×'+n : 'KV';
+
+    var ow=document.getElementById('overflowWrap'), ov=document.getElementById('overflow');
+    var fitTag=document.getElementById('fitTag'), note=document.getElementById('memNote'),
+        vd=document.getElementById('verdict');
+    if(over){
+      ow.style.display='block';
+      ov.style.width=Math.min((used-BUDGET)/BUDGET*100,100)+'%';
+      fitTag.textContent='예산 초과'; fitTag.style.color='var(--text-danger)';
+      vd.textContent='OOM'; vd.style.color='var(--text-danger)';
+      note.style.color='var(--text-danger)';
+      note.innerHTML='<i class="ti ti-alert-triangle"></i> 필요 '+used.toFixed(1)+'GB > 예산 24GB — 초과분('+(used-BUDGET).toFixed(1)+'GB)만큼 로딩 실패(OOM) 또는 스왑. 별도 인스턴스로 띄우면 모델 18GB까지 복제돼 더 심각.';
+    } else {
+      ow.style.display='none';
+      fitTag.textContent = n===1?'정상 (직렬)':'빠듯';
+      fitTag.style.color = n===1?'var(--text-success)':'var(--text-warning)';
+      vd.textContent = n===1?'정상':'위험';
+      vd.style.color = n===1?'var(--text-success)':'var(--text-warning)';
+      note.style.color='var(--text-secondary)';
+      note.innerHTML = n===1
+        ? '<i class="ti ti-check" style="color:var(--text-success);"></i> 직렬(1개) — 필요 '+used.toFixed(1)+'GB. 24GB에 겨우 들어가 이미 빠듯(그래서 num_ctx 하향이 유효).'
+        : '<i class="ti ti-alert-circle" style="color:var(--text-warning);"></i> 아직 안 넘었지만 여유가 거의 없어 스왑 위험. 처리량은 그대로 ≈1×라 이득도 없음.';
+    }
+  }
+  par.addEventListener('input',upd); upd();
+})();
+</script>
+</body>
+</html>

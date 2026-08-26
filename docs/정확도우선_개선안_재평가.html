@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>정확도 우선 관점 — 개선안 재평가</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.5.0/dist/tabler-icons.min.css">
+<style>
+:root{
+  --surface-2:#ffffff; --surface-1:#faf9f5; --surface-0:#f0eee6;
+  --text-primary:#1a1a18; --text-secondary:#57564f; --text-muted:#8a8980;
+  --text-accent:#185fa5; --text-danger:#a32d2d; --text-success:#0f6e56; --text-warning:#854f0b; --text-purple:#3c3489;
+  --bg-accent:#e6f1fb; --bg-danger:#fcebeb; --bg-success:#e1f5ee; --bg-warning:#faeeda; --bg-purple:#eeedfe;
+  --border:#e5e3da; --border-strong:#d3d1c7;
+  --border-accent:#378add; --border-danger:#e24b4a; --border-success:#1d9e75; --border-warning:#ba7517; --border-purple:#7f77dd;
+  --radius:8px; --pad-md:16px; --gap-sm:12px;
+  --font-sans:-apple-system,BlinkMacSystemFont,"Segoe UI","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --font-mono:"SF Mono",Menlo,Monaco,Consolas,"D2Coding",monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --surface-2:#26251f; --surface-1:#1f1e19; --surface-0:#161511;
+    --text-primary:#ecebe3; --text-secondary:#b4b2a9; --text-muted:#8a8980;
+    --text-accent:#85b7eb; --text-danger:#f09595; --text-success:#5dcaa5; --text-warning:#fac775; --text-purple:#afa9ec;
+    --bg-accent:#0c447c; --bg-danger:#501313; --bg-success:#085041; --bg-warning:#633806; --bg-purple:#3c3489;
+    --border:#3a3833; --border-strong:#4a4842;
+    --border-accent:#378add; --border-danger:#e24b4a; --border-success:#1d9e75; --border-warning:#ba7517; --border-purple:#7f77dd;
+  }
+}
+*{box-sizing:border-box;}
+body{margin:0; background:var(--surface-0); color:var(--text-primary); font-family:var(--font-sans); line-height:1.7; padding:2rem 1rem;}
+.wrap{max-width:860px; margin:0 auto;}
+h1{font-size:22px; font-weight:500; margin:0 0 .25rem;}
+h2.sec{font-size:18px; font-weight:500; margin:2.5rem 0 .75rem; padding-top:1.25rem; border-top:1px solid var(--border);}
+.sub{font-size:14px; color:var(--text-secondary); margin-bottom:1.25rem;}
+.lead{font-size:13px; color:var(--text-secondary); margin:-.25rem 0 1rem;}
+.sr-only{position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); border:0;}
+code{font-family:var(--font-mono); font-size:.92em;}
+pre{overflow-x:auto;}
+p{margin:0 0 1rem;}
+.card{background:var(--surface-1); border:1px solid var(--border); border-radius:12px; padding:var(--pad-md);}
+.grid2{display:grid; grid-template-columns:1fr 1fr; gap:var(--gap-sm);}
+@media(max-width:640px){.grid2{grid-template-columns:1fr;}}
+.chip{display:inline-flex; align-items:center; gap:5px; font-size:11.5px; padding:2px 8px; border-radius:999px; font-weight:500;}
+.lv{display:flex; align-items:flex-start; gap:10px; padding:11px 12px; border:1px solid var(--border-strong); border-radius:10px; background:var(--surface-2); cursor:pointer; margin-bottom:8px;}
+.lv.on{border-color:var(--border-success); background:var(--bg-success);}
+.lv .bx{flex:none; width:20px; height:20px; border-radius:5px; border:1.5px solid var(--border-strong); display:flex; align-items:center; justify-content:center; margin-top:2px; font-size:13px; color:#fff;}
+.lv.on .bx{background:var(--text-success); border-color:var(--text-success);}
+.lv .bx i{opacity:0;} .lv.on .bx i{opacity:1;}
+select{padding:8px; border-radius:var(--radius); border:1px solid var(--border-strong); background:var(--surface-2); color:var(--text-primary); font-family:var(--font-sans); font-size:13px; width:100%;}
+label.f{display:block; font-size:12px; color:var(--text-secondary); margin:0 0 4px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h2 class="sr-only">정확도를 속도보다 우선하는 관점에서, qwen3:30b-a3b가 구조화 추출에 반드시 더 정확하지 않은 이유(MoE 3B 활성 vs 7b dense, 24GB 스왑)와 5→3배치의 정확도 위험을 설명하고, 개선 레버를 정확도 무위험(num_ctx·keep_alive·CLI)과 측정 필요(모델·배치)로 분류해 안전한 타협 경로와 골든셋 검증법을 제시하고, 레버·CLI·num_ctx 용어를 설명하는 인터랙티브 문서</h2>
+
+<h1>정확도 우선 관점 — 개선안 재평가</h1>
+<div class="sub">속도보다 정확도가 중요할 때, 어디까지 타협 가능한가</div>
+
+<div class="grid2" style="margin-bottom:1.5rem;">
+  <div class="card" style="background:var(--bg-warning); border-color:var(--border-warning);">
+    <b style="color:var(--text-warning);"><i class="ti ti-alert-triangle" aria-hidden="true"></i> 오해 1 — "30b라서 더 정확하다"</b>
+    <div style="font-size:13px; color:var(--text-secondary); margin-top:8px;">qwen3:30b-a3b는 <b style="color:var(--text-primary);">MoE — 토큰당 활성 파라미터 ≈ 3B</b>. 구조화 추출에서 qwen2.5:7b(7B 전량 활성 dense)보다 반드시 정확하다는 보장이 없습니다. 게다가 <b style="color:var(--text-primary);">24GB에서 30b + num_ctx 32768은 스왑</b>이 걸릴 수 있어 — 343초/배치의 진짜 원인이 '정확도용 연산'이 아니라 '메모리 한계'일 가능성이 큽니다.</div>
+  </div>
+  <div class="card" style="background:var(--bg-danger); border-color:var(--border-danger);">
+    <b style="color:var(--text-danger);"><i class="ti ti-alert-triangle" aria-hidden="true"></i> 오해 2 — "39/43이 정확도다"</b>
+    <div style="font-size:13px; color:var(--text-secondary); margin-top:8px;"><b style="color:var(--text-primary);">39/43은 '채움율'(빈칸 아님)이지 '정답율'이 아닙니다.</b> 작은 모델이 43칸을 다 채우고도 값이 틀릴 수 있어요. 정확도로 의사결정하려면 <b style="color:var(--text-primary);">정답이 붙은 골든셋</b>에서 값 단위 일치율을 봐야 합니다.</div>
+  </div>
+</div>
+
+<div class="card" style="background:var(--bg-accent); border-color:var(--border-accent); margin-bottom:1.5rem;">
+  <b style="color:var(--text-accent);"><i class="ti ti-bulb" aria-hidden="true"></i> 결론부터 — 타협 가능한 시나리오는 "레버 분리"</b>
+  <p style="margin:.5rem 0 0; font-size:14px; color:var(--text-secondary);">개선 레버는 정확도에 <b style="color:var(--text-success);">영향이 전혀 없는 것</b>과 <b style="color:var(--text-warning);">정확도를 바꿀 수 있는 것</b>으로 갈립니다. <b style="color:var(--text-primary);">무위험 레버만 먼저 적용하면 지금의 5배치·30b 정확도를 그대로 유지한 채 속도만</b> 얻습니다. 모델·배치는 골든셋으로 정확도를 확인한 뒤에만 손대세요.</p>
+</div>
+
+<h2 class="sec"><i class="ti ti-vocabulary" aria-hidden="true" style="color:var(--text-purple);"></i> 먼저 — 용어 3가지</h2>
+<div class="lead">아래 분류기를 보기 전에 알아두면 좋은 개념입니다.</div>
+
+<details open style="margin-bottom:10px;">
+  <summary style="cursor:pointer; font-weight:500; padding:12px 14px; background:var(--bg-purple); border:1px solid var(--border-purple); border-radius:10px; color:var(--text-purple);"><i class="ti ti-adjustments-alt" aria-hidden="true"></i> 레버(lever) — 결과를 바꾸는 조절 손잡이</summary>
+  <div class="card" style="border-top:none; border-radius:0 0 10px 10px; font-size:13px; color:var(--text-secondary);">
+    원래 뜻은 "지렛대". 여기선 <b style="color:var(--text-primary);">건드리면 속도·정확도가 크게 움직이는 조정 항목</b>을 비유한 말입니다. "모델 크기", "배치 수", "num_ctx"가 각각 하나의 레버죠. 지렛대처럼 작게 조정해도 결과가 크게 바뀌고, 여러 개를 <b style="color:var(--text-primary);">동시에 당기면 효과가 섞여 원인 파악이 어려워집니다.</b> 그래서 "레버를 분리해 하나씩 당기자"고 하는 겁니다.
+  </div>
+</details>
+
+<details open style="margin-bottom:10px;">
+  <summary style="cursor:pointer; font-weight:500; padding:12px 14px; background:var(--bg-purple); border:1px solid var(--border-purple); border-radius:10px; color:var(--text-purple);"><i class="ti ti-terminal-2" aria-hidden="true"></i> CLI — 터미널에서 실행하는 방식</summary>
+  <div class="card" style="border-top:none; border-radius:0 0 10px 10px; font-size:13px; color:var(--text-secondary);">
+    <b style="color:var(--text-primary);">Command Line Interface(명령줄 인터페이스)</b>의 약자. 마우스로 클릭하는 화면(GUI) 대신 터미널에 명령어를 타이핑해 프로그램을 실행하는 방식입니다. 지금은 Streamlit 웹 화면에서 버튼으로 돌리는데, "CLI로 분리"는 그 배치 작업을 화면에서 떼어 <code>python batch_ingest.py ./reports</code>처럼 <b style="color:var(--text-primary);">독립 프로그램으로 실행</b>한다는 뜻입니다. 8시간 작업이 브라우저 세션에 묶이지 않아 탭을 닫거나 새로고침해도 안 끊깁니다. <b style="color:var(--text-primary);">추출 로직은 그대로, 실행 껍데기만 바뀌므로 정확도 영향 0.</b>
+  </div>
+</details>
+
+<details open style="margin-bottom:1.25rem;">
+  <summary style="cursor:pointer; font-weight:500; padding:12px 14px; background:var(--bg-purple); border:1px solid var(--border-purple); border-radius:10px; color:var(--text-purple);"><i class="ti ti-ruler-2" aria-hidden="true"></i> num_ctx 32768 → 16384 — 문맥 창 크기 줄이기</summary>
+  <div class="card" style="border-top:none; border-radius:0 0 10px 10px; font-size:13px; color:var(--text-secondary);">
+    num_ctx는 <b style="color:var(--text-primary);">모델이 한 번에 다룰 수 있는 최대 토큰(글자 조각) 수</b> = 문맥 창의 크기입니다. 32768 토큰이면 대략 A4 수십 장 분량.<br><br>
+    <b style="color:var(--text-primary);">왜 줄여도 안전한가</b> — 현재 코드는 배치마다 보고서를 <b style="color:var(--text-primary);">최대 12,000자(≈6천 토큰)까지만</b> 잘라 넣습니다. 창을 32768로 열어둔 건 실제 쓰는 양의 5배가 넘는 빈 방을 예약해 둔 셈. 16384로 줄여도 6천 토큰 청크는 여유 있게 다 들어가므로 <b style="color:var(--text-primary);">모델이 보는 내용은 하나도 안 잘리고 출력 품질도 그대로</b>입니다.<br><br>
+    <b style="color:var(--text-primary);">왜 속도가 빨라지나</b> — 창이 클수록 KV 캐시(임시 메모리)가 커집니다. 24GB 맥에서 30b 모델까지 올리면 이 캐시가 메모리를 압박해 <b style="color:var(--text-primary);">스왑</b>(느린 디스크로 밀려남)이 생길 수 있고, 배치당 343초가 이 때문일 가능성이 큽니다. 16384로 낮추면 메모리를 되찾아 스왑이 풀리므로, <b style="color:var(--text-primary);">정확도는 그대로인데 속도만 빨라지는</b> 대표적 무위험 레버가 됩니다.
+  </div>
+</details>
+
+<h2 class="sec"><i class="ti ti-adjustments-check" aria-hidden="true" style="color:var(--text-success);"></i> 레버 분류기 — 조합해 보고 위험도를 확인하세요</h2>
+<div class="lead">아래 무위험 레버를 켜도 정확도는 그대로입니다. 모델·배치를 바꾸면 '측정 필요'로 표시됩니다.</div>
+
+<div class="grid2" style="margin-bottom:.75rem;">
+  <div>
+    <div class="chip" style="background:var(--bg-success); color:var(--text-success); margin-bottom:8px;"><i class="ti ti-shield-check" aria-hidden="true"></i> 정확도 무위험 (그대로 적용)</div>
+    <div class="lv on" data-k="ctx"><div class="bx"><i class="ti ti-check" aria-hidden="true"></i></div><div><b>num_ctx 32768 → 16384</b><div style="font-size:12.5px; color:var(--text-secondary);">텍스트가 다 들어가면 출력 품질 불변. 스왑 완화로 오히려 큰 속도 이득 가능.</div></div></div>
+    <div class="lv on" data-k="keep"><div class="bx"><i class="ti ti-check" aria-hidden="true"></i></div><div><b>keep_alive 30m (모델 상주)</b><div style="font-size:12.5px; color:var(--text-secondary);">50파일 연속 시 파일마다 재로딩 제거. 출력은 동일.</div></div></div>
+    <div class="lv on" data-k="cli"><div class="bx"><i class="ti ti-check" aria-hidden="true"></i></div><div><b>배치 루프 CLI 분리</b><div style="font-size:12.5px; color:var(--text-secondary);">세션 블로킹·중단 위험 제거. 추출 로직 자체는 그대로.</div></div></div>
+  </div>
+  <div>
+    <div class="chip" style="background:var(--bg-warning); color:var(--text-warning); margin-bottom:8px;"><i class="ti ti-flask" aria-hidden="true"></i> 정확도 측정 필요 (검증 후 채택)</div>
+    <div class="card" style="background:var(--surface-2);">
+      <label class="f">LLM 모델</label>
+      <select id="mdl">
+        <option value="1.0" data-risk="0">qwen3:30b-a3b (현재 유지)</option>
+        <option value="0.35" data-risk="1">qwen3:8b</option>
+        <option value="0.30" data-risk="1">qwen2.5:7b-instruct</option>
+        <option value="0.15" data-risk="1">qwen2.5:3b</option>
+      </select>
+      <label class="f" style="margin-top:12px;">배치 수</label>
+      <select id="bt">
+        <option value="5" data-risk="0">5배치 (현재 유지 · 정확도 우선)</option>
+        <option value="4" data-risk="1">4배치</option>
+        <option value="3" data-risk="1">3배치</option>
+      </select>
+      <div style="font-size:12px; color:var(--text-muted); margin-top:8px;"><i class="ti ti-info-circle" aria-hidden="true"></i> 배치를 줄이면 호출당 필드가 늘어 누락·JSON오류 위험 ↑. 모델 축소와 <b>동시</b>에 하면 위험이 겹칩니다.</div>
+    </div>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:.5rem;">
+  <div style="display:flex; flex-wrap:wrap; gap:16px; align-items:center; justify-content:space-between;">
+    <div><div style="font-size:12px; color:var(--text-secondary);">파일당 예상(대략)</div><div id="perFile" style="font-size:24px; font-weight:500;">—</div></div>
+    <div><div style="font-size:12px; color:var(--text-secondary);">현재 대비</div><div id="speedup" style="font-size:24px; font-weight:500; color:var(--text-accent);">—</div></div>
+    <div id="riskBadge" style="flex:none;"></div>
+  </div>
+  <div id="riskNote" style="font-size:13px; margin-top:10px;"></div>
+</div>
+
+<h2 class="sec"><i class="ti ti-route" aria-hidden="true" style="color:var(--text-accent);"></i> 권장 — 정확도 우선 2단계</h2>
+<div class="grid2">
+  <div class="card" style="border-left:3px solid var(--border-success); border-radius:0;">
+    <div class="chip" style="background:var(--bg-success); color:var(--text-success);">STEP 1 · 지금 바로 (무위험)</div>
+    <div style="font-size:13px; color:var(--text-secondary); margin-top:8px;"><b style="color:var(--text-primary);">30b · 5배치 그대로 유지</b> + num_ctx 16384 + keep_alive + CLI 분리. 정확도 손실 0. 스왑이 원인이었다면 속도가 눈에 띄게 개선됩니다. <b style="color:var(--text-primary);">이것만으로도 실사용 가능한지</b> 먼저 확인.</div>
+  </div>
+  <div class="card" style="border-left:3px solid var(--border-warning); border-radius:0;">
+    <div class="chip" style="background:var(--bg-warning); color:var(--text-warning);">STEP 2 · 더 빨라야 할 때만 (측정)</div>
+    <div style="font-size:13px; color:var(--text-secondary); margin-top:8px;">골든셋으로 <b style="color:var(--text-primary);">모델 하나씩</b>(30b→8b→7b) 정확도 비교. 통과하면 채택. 배치는 <b style="color:var(--text-primary);">마지막에 따로</b> 5→4→3 검증. 한 번에 둘을 바꾸지 않기.</div>
+  </div>
+</div>
+
+<h2 class="sec"><i class="ti ti-target-arrow" aria-hidden="true" style="color:var(--text-purple);"></i> 결정 도구 — 골든셋 정확도 검증</h2>
+<div class="lead">"채움율"이 아니라 "정답율"로 판단하기 위한 최소 절차.</div>
+<pre style="background:var(--surface-1); border:1px solid var(--border-purple); border-radius:12px; padding:var(--pad-md); font-family:var(--font-mono); font-size:12.5px; line-height:1.6; margin:0 0 1rem; overflow-x:auto;"><span style="color:var(--text-muted);"># eval_extraction.py — 설정별 값 단위 정답율 비교</span>
+<span style="color:var(--text-muted);"># 1) 대표 보고서 10건을 사람이 직접 43필드 라벨링 → golden.json</span>
+<span style="color:var(--text-muted);"># 2) 각 설정으로 추출 후 필드별 일치 여부 집계</span>
+CONFIGS = [
+    (<span style="color:var(--text-success);">"30b·5배치"</span>, <span style="color:var(--text-success);">"qwen3:30b-a3b"</span>, BATCHES),      <span style="color:var(--text-purple);"># 기준(baseline)</span>
+    (<span style="color:var(--text-success);">"7b·5배치"</span>,  <span style="color:var(--text-success);">"qwen2.5:7b-instruct"</span>, BATCHES),
+    (<span style="color:var(--text-success);">"7b·3배치"</span>,  <span style="color:var(--text-success);">"qwen2.5:7b-instruct"</span>, BATCHES_3),
+]
+<span style="color:var(--text-accent);">for</span> name, model, batches <span style="color:var(--text-accent);">in</span> CONFIGS:
+    hit = total = 0
+    <span style="color:var(--text-accent);">for</span> pdf, truth <span style="color:var(--text-accent);">in</span> golden.items():
+        pred,_ = extract_from_pdf(open(pdf,<span style="color:var(--text-success);">'rb'</span>).read(), model, batches=batches)
+        <span style="color:var(--text-accent);">for</span> k, v <span style="color:var(--text-accent);">in</span> truth.items():
+            total += 1
+            hit   += norm(pred.get(k)) == norm(v)     <span style="color:var(--text-purple);"># 정규화 후 값 일치</span>
+    print(f<span style="color:var(--text-success);">"{name}: 정답율 {hit/total:.1%}"</span>)         <span style="color:var(--text-purple);"># 채움율 아님 — 정답율</span>
+<span style="color:var(--text-muted);"># → 30b 대비 정답율이 허용범위(예: -2%p 이내)면 그 설정 채택</span></pre>
+
+<div class="card" style="background:var(--bg-accent); border-color:var(--border-accent);">
+  <b style="color:var(--text-accent);"><i class="ti ti-flag" aria-hidden="true"></i> 한 줄 답</b>
+  <div style="font-size:14px; color:var(--text-secondary); margin-top:6px;">추천안은 <b style="color:var(--text-primary);">통째로는 정확도 타협</b>이지만, <b style="color:var(--text-primary);">무위험 레버(num_ctx·keep_alive·CLI)만 떼어 쓰면 정확도 타협 없이</b> 속도를 얻습니다. 모델·배치 축소는 골든셋 정답율이 허용범위일 때만 — 그게 '타협 가능한' 유일한 방식입니다.</div>
+</div>
+
+<div class="card" style="margin-top:1.25rem; background:var(--surface-2);">
+  <b><i class="ti ti-arrow-right" aria-hidden="true"></i> 다음 단계</b>
+  <div style="font-size:13px; color:var(--text-secondary); margin-top:6px;">원하시면 (1) STEP 1 무위험 패치(extract_from_pdf에 num_ctx·keep_alive 인자 + CLI) 코드, (2) <code>eval_extraction.py</code> 골든셋 검증 스크립트를 만들어 드립니다. 골든셋 라벨링은 대표 보고서 10건이면 충분합니다.</div>
+</div>
+
+</div>
+
+<script>
+(function(){
+  var BASE=343;
+  var safe={ctx:true,keep:true,cli:true};
+  document.querySelectorAll('.lv').forEach(function(el){
+    el.addEventListener('click',function(){
+      var k=el.dataset.k; safe[k]=!safe[k]; el.classList.toggle('on',safe[k]); upd();
+    });
+  });
+  var mdl=document.getElementById('mdl'), bt=document.getElementById('bt');
+  mdl.addEventListener('change',upd); bt.addEventListener('change',upd);
+  function fmt(s){ return s<3600 ? (s/60).toFixed(1)+'분' : (s/3600).toFixed(1)+'시간'; }
+  function upd(){
+    var mf=+mdl.value, b=+bt.value;
+    var cf = safe.ctx ? 0.85 : 1.0;
+    var per = BASE*b*mf*cf;
+    var cur = BASE*5*1.0*1.0;
+    document.getElementById('perFile').textContent=fmt(per);
+    document.getElementById('speedup').textContent=(cur/per).toFixed(1)+'배';
+    var mRisk = mdl.options[mdl.selectedIndex].dataset.risk==='1';
+    var bRisk = bt.options[bt.selectedIndex].dataset.risk==='1';
+    var badge=document.getElementById('riskBadge'), note=document.getElementById('riskNote');
+    if(!mRisk && !bRisk){
+      badge.innerHTML='<span class="chip" style="background:var(--bg-success); color:var(--text-success); font-size:13px; padding:5px 12px;"><i class="ti ti-shield-check"></i> 정확도 그대로</span>';
+      note.style.color='var(--text-success)';
+      note.innerHTML='<i class="ti ti-check"></i> 무위험 레버만 사용 — 현재 5배치·30b 정확도를 유지한 채 속도만 얻습니다.'
+        + (safe.ctx?' 스왑이 병목이었다면 실제 개선폭은 표시값보다 클 수 있습니다.':'');
+    } else if(mRisk && bRisk){
+      badge.innerHTML='<span class="chip" style="background:var(--bg-danger); color:var(--text-danger); font-size:13px; padding:5px 12px;"><i class="ti ti-alert-triangle"></i> 위험 중첩</span>';
+      note.style.color='var(--text-danger)';
+      note.innerHTML='<i class="ti ti-alert-triangle"></i> 모델·배치를 동시에 바꿈 — 정확도 리스크가 겹칩니다. 한 번에 하나씩, 골든셋 검증 후에만 채택하세요.';
+    } else {
+      badge.innerHTML='<span class="chip" style="background:var(--bg-warning); color:var(--text-warning); font-size:13px; padding:5px 12px;"><i class="ti ti-flask"></i> 측정 필요</span>';
+      note.style.color='var(--text-warning)';
+      note.innerHTML='<i class="ti ti-flask"></i> '+(mRisk?'모델':'배치')+'을 변경 — 골든셋 정답율이 허용범위인지 확인 후 채택하세요.';
+    }
+  }
+  upd();
+})();
+</script>
+</body>
+</html>
